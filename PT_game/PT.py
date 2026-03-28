@@ -10,8 +10,8 @@ import pygame
 # --- Configurație Rețea Conform Documentației ---
 UDP_IP_BROADCAST = "255.255.255.255"
 UDP_IP_LOCAL = "127.0.0.1"           
-UDP_PORT_SEND = 1067
-UDP_PORT_RECV = 1069
+UDP_PORT_SEND = 4626
+UDP_PORT_RECV = 7800
 
 NUM_CHANNELS = 8
 LEDS_PER_CHANNEL = 64
@@ -45,7 +45,7 @@ class PianoTilesEngine:
         self.mode = None       
         self.start_time = 0
         self.is_pulsing = False
-        self.speed = 10 
+        self.speed = 7 
         self.game_over = False
         self.song_duration = 0
         self.stars = []
@@ -241,7 +241,7 @@ class PianoTilesEngine:
             return buffer
 
         if self.mode and self.is_pulsing:
-            if t - self.start_time > 2.0: 
+            if t - self.start_time > 5.0: 
                 self.is_pulsing = False
                 self.start_time = time.time() 
                 
