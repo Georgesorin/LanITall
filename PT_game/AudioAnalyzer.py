@@ -24,7 +24,7 @@ def generate_beatmap(audio_path, output_json):
 
     # Detectare Onset-uri (metodă standard, mult mai permisivă)
     onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-    onset_frames = librosa.onset.onset_detect(onset_envelope=onset_env, sr=sr, wait=2.5)
+    onset_frames = librosa.onset.onset_detect(onset_envelope=onset_env, sr=sr, wait=2)
     onset_times = librosa.frames_to_time(onset_frames, sr=sr)
 
     # Extragem înălțimea sunetelor
@@ -36,7 +36,7 @@ def generate_beatmap(audio_path, output_json):
     for i, time_sec in enumerate(onset_times):
         # FILTRU DE JUCABILITATE: 
         # Ignorăm notele care sunt la mai puțin de 0.12 secunde de precedenta (aprox 8 note/secundă max)
-        if time_sec - last_time < 0.12:
+        if time_sec - last_time < 0.2:
             continue
         
         last_time = time_sec
