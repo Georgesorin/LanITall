@@ -33,8 +33,10 @@ LIGHT_GRAY = (200, 200, 200)
 TILE_COLS_M1 = [2, 5, 9, 12]
 TILE_COLS_M2 = [6, 7, 8, 9] 
 
-HIT_ZONE_BOTTOM = (24, 29)
-HIT_ZONE_TOP    = (2, 7)
+# Zone de hit
+HIT_ZONE_BOTTOM_COOP = (16, 31) # Super-forgiving pentru Co-op
+HIT_ZONE_BOTTOM = (22, 31)      # Pentru 1v1
+HIT_ZONE_TOP    = (0, 9)        # Pentru 1v1 P1
 FLASH_DURATION  = 0.20
 
 class PianoTilesEngine:
@@ -44,12 +46,13 @@ class PianoTilesEngine:
         self.start_time = 0
         self.is_pulsing = False
         self.speed = 10 
+        self.game_over = False
+        self.song_duration = 0
+        self.stars = []
 
-        # Extins la 512 pentru a citi toată podeaua fizică
         self.button_states = [False] * 512
         self.prev_button_states = [False] * 512
 
-        # MATRICE VIZUALĂ PENTRU GUI
         self.display_matrix = [[BLACK for _ in range(WIDTH)] for _ in range(HEIGHT)]
 
         self.audio_enabled = False
@@ -76,6 +79,8 @@ class PianoTilesEngine:
                 with open(filename, 'r') as f:
                     data = json.load(f)
                     self.beatmap = data[::1]
+                    if self.beatmap:
+                        self.song_duration = max(t['time'] for t in self.beatmap)
         except Exception:
             pass
 
@@ -85,13 +90,23 @@ class PianoTilesEngine:
         self.flash_hits = {}
         self.score_p1 = 0; self.misses_p1 = 0
         self.score_p2 = 0; self.misses_p2 = 0
+        self.game_over = False
+        
+        self.stars = []
+        for _ in range(25):
+            self.stars.append([
+                random.uniform(0, WIDTH), 
+                random.uniform(0, HEIGHT), 
+                random.uniform(2, 6),
+                random.uniform(0, math.pi * 2)
+            ])
         
         if self.audio_enabled and self.music_playing:
             pygame.mixer.music.stop()
             self.music_playing = False
 
     def process_inputs(self):
-        if self.mode is None or self.is_pulsing:
+        if self.mode is None or self.is_pulsing or self.game_over:
             self.prev_button_states = list(self.button_states)
             return
             
@@ -100,15 +115,30 @@ class PianoTilesEngine:
         
         for i in range(512):
             if self.button_states[i] and not self.prev_button_states[i]:
-                # Transformare din index fizic în coordonate (X, Y)
                 channel, local = i // 64, i % 64
                 row, col_raw = local // 16, local % 16
                 x = col_raw if row % 2 == 0 else 15 - col_raw
                 
-                # Verificăm dacă apăsarea e pe una din coloanele active
-                if x in active_cols:
-                    col_index = active_cols.index(x) 
-                    self._try_hit(col_index, t)
+                target_col_idx = None
+                
+                if self.mode == '1':
+                    # CO-OP FAT FOOT: Acceptă -1, 0, +1, +2 față de coloana de bază
+                    for idx, ac in enumerate(active_cols):
+                        if ac - 1 <= x <= ac + 2:
+                            target_col_idx = idx
+                            break
+                else:
+                    # 1v1 FAT FOOT: +/- 1 tile
+                    if x in active_cols:
+                        target_col_idx = active_cols.index(x)
+                    else:
+                        for idx, ac in enumerate(active_cols):
+                            if abs(x - ac) == 1:
+                                target_col_idx = idx
+                                break
+                            
+                if target_col_idx is not None:
+                    self._try_hit(target_col_idx, t)
                     
         self.prev_button_states = list(self.button_states)
 
@@ -122,17 +152,18 @@ class PianoTilesEngine:
             if tile['column'] != col: continue
             target_time = tile['time']
             time_diff = abs(song_time - target_time)
-            
-            if time_diff > 0.3: continue 
 
             if self.mode == '1':
+                # Timp de reacție masiv pentru Co-op (0.6 secunde)
+                if time_diff > 0.6: continue 
                 if tile_id not in self.hit_tiles[col]:
                     py = int(27 - (target_time - song_time) * self.speed)
-                    if HIT_ZONE_BOTTOM[0] <= py <= HIT_ZONE_BOTTOM[1]:
+                    if HIT_ZONE_BOTTOM_COOP[0] <= py <= HIT_ZONE_BOTTOM_COOP[1]:
                         if time_diff < min_diff_1:
                             min_diff_1 = time_diff; best_t1 = tile_id
                             
             elif self.mode == '2':
+                if time_diff > 0.4: continue 
                 uid_d = f"d_{tile_id}"
                 if uid_d not in self.hit_tiles[col]:
                     pd = int(27 - (target_time - song_time) * self.speed)
@@ -167,11 +198,16 @@ class PianoTilesEngine:
         expired = [k for k, start_t in self.flash_hits.items() if t - start_t > FLASH_DURATION]
         for k in expired: del self.flash_hits[k]
 
-        if self.mode is None or self.is_pulsing: return
+        if self.mode is None or self.is_pulsing or self.game_over: return
         song_time = t - self.start_time
 
+        if self.song_duration > 0 and song_time > self.song_duration + 3.0: 
+            self.game_over = True
+            return
+
         for tile_id, tile in enumerate(self.beatmap):
-            if song_time > tile['time'] + 0.3:
+            allowance = 0.6 if self.mode == '1' else 0.4
+            if song_time > tile['time'] + allowance:
                 col = tile['column']
                 if self.mode == '1':
                     if tile_id not in self.hit_tiles[col] and tile_id not in self.miss_tiles[col]:
@@ -188,6 +224,24 @@ class PianoTilesEngine:
         buffer = bytearray(FRAME_DATA_LENGTH)
         t = time.time()
         self._update_logic()
+
+        if self.game_over:
+            for y in range(HEIGHT):
+                for x in range(WIDTH):
+                    self.set_pixel(buffer, x, y, *BLACK)
+                    
+            for star in self.stars:
+                star[0] -= star[2] * 0.05
+                if star[0] < 0:
+                    star[0] = WIDTH
+                    star[1] = random.uniform(0, HEIGHT)
+                
+                x, y = int(star[0]), int(star[1])
+                brightness = int(127 + 127 * math.sin(t * 8 + star[3]))
+                self.set_pixel(buffer, x, y, brightness, brightness, brightness)
+                if x + 1 < WIDTH:
+                    self.set_pixel(buffer, x + 1, y, int(brightness*0.3), int(brightness*0.3), int(brightness*0.3))
+            return buffer
 
         if self.mode and self.is_pulsing:
             if t - self.start_time > 2.0: 
@@ -241,12 +295,13 @@ class PianoTilesEngine:
                         py_f = 27 - (target_time - song_time) * self.speed
                         py = int(py_f)
                         
-                        if py <= y <= py + 1:
+                        # CO-OP 2x1 TILE (Aici se randează doar 1 pixel pe înălțime)
+                        if y == py:
                             if tile_id in self.hit_tiles[json_col]:
                                 if (json_col, tile_id, 'down') in self.flash_hits: 
                                     self.set_pixel(buffer, x, y, *GREEN)
                             else:
-                                color = YELLOW if (HIT_ZONE_BOTTOM[0] <= py_f <= HIT_ZONE_BOTTOM[1]) else CYAN
+                                color = YELLOW if (HIT_ZONE_BOTTOM_COOP[0] <= py_f <= HIT_ZONE_BOTTOM_COOP[1]) else CYAN
                                 self.set_pixel(buffer, x, y, *color)
                                 
                     elif self.mode == '2':
@@ -281,23 +336,18 @@ class PianoTilesEngine:
 
     def set_pixel(self, buffer, target_x, target_y, r, g, b):
         if target_x < 0 or target_x >= WIDTH or target_y < 0 or target_y >= HEIGHT: return
-        
         self.display_matrix[target_y][target_x] = (r, g, b)
-
         channel = target_y // 4
         if channel >= NUM_CHANNELS: return
-        
         row = target_y % 4
         idx = (row * 16 + target_x) if row % 2 == 0 else (row * 16 + (15 - target_x))
-        
         offset = idx * 24 + channel 
         if offset + 16 < len(buffer):
             buffer[offset] = g      
             buffer[offset + 8] = r
             buffer[offset + 16] = b
 
-
-# --- HARDWARE COMPLIANT NETWORK MANAGER ---
+# --- NETWORK MANAGER ---
 class NetworkManager:
     def __init__(self, game):
         self.game = game
@@ -324,7 +374,6 @@ class NetworkManager:
     def send_packet(self, frame_data):
         self.sequence_number = (self.sequence_number + 1) & 0xFFFF
         if self.sequence_number == 0: self.sequence_number = 1
-        
         port = UDP_PORT_SEND
         
         # --- 1. Start Packet ---
@@ -359,7 +408,6 @@ class NetworkManager:
         ]) + fff0_internal
         fff0_packet.append(0x1E) 
         fff0_packet.append(0x00) 
-        
         try: 
             self.sock_send.sendto(fff0_packet, (UDP_IP_BROADCAST, port))
             self.sock_send.sendto(fff0_packet, (UDP_IP_LOCAL, port))
@@ -386,7 +434,6 @@ class NetworkManager:
             if len(chunk) == 984: packet.append(0x1E) 
             else: packet.append(0x36) 
             packet.append(0x00)
-            
             try: 
                 self.sock_send.sendto(packet, (UDP_IP_BROADCAST, port))
                 self.sock_send.sendto(packet, (UDP_IP_LOCAL, port))
@@ -459,11 +506,13 @@ class VisualInterface:
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_1:
                         self.game.mode = '1'
+                        self.game.speed = 7      # Mai lent și aerisit pentru Co-op
                         self.game.is_pulsing = True
                         self.game._reset_state()
                         self.game.start_time = time.time()
                     elif event.key == pygame.K_2:
                         self.game.mode = '2'
+                        self.game.speed = 18     # Rămâne rapid pentru 1v1
                         self.game.is_pulsing = True
                         self.game._reset_state()
                         self.game.start_time = time.time()
@@ -510,6 +559,9 @@ class VisualInterface:
                 self.draw_text(f"Hits: {self.game.score_p2} | Misses: {self.game.misses_p2}", self.font_small, WHITE, px, 290)
                 missed_p2_list = sorted([int(t.split('_')[1]) for col in self.game.miss_tiles.values() for t in col if str(t).startswith('d_')])
                 if missed_p2_list: self.draw_text(f"Ratări: {str(missed_p2_list[:10])}", self.font_small, WHITE, px, 315)
+
+            if self.game.game_over:
+                self.draw_text("SONG COMPLETE!", self.font_large, YELLOW, px, 370)
 
             self.draw_text("Comenzi Tastatură:", self.font_large, WHITE, px, 450)
             self.draw_text("[1] - Start Mod Co-op", self.font_small, LIGHT_GRAY, px, 490)
