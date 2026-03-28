@@ -38,7 +38,7 @@ class PianoTilesEngine:
         self.mode = None       
         self.start_time = 0
         self.is_pulsing = False
-        self.speed = 15 # Viteza de cădere (rânduri per secundă)
+        self.speed = 15 # Viteza de cădere
 
         self.button_states = [False] * 64
         self.prev_button_states = [False] * 64
@@ -51,7 +51,6 @@ class PianoTilesEngine:
             self.audio_enabled = True
         except pygame.error as e:
             print(f"\n[AVERTISMENT CRITIC] Nu s-a putut inițializa placa de sunet! Eroare: {e}")
-            print("-> Dacă ești în WSL (Linux), MUTĂ-TE pe Windows (CMD/PowerShell) pentru a avea sunet!\n")
 
         # --- Încărcare Nivel ---
         self.beatmap = []
@@ -69,13 +68,11 @@ class PianoTilesEngine:
             if os.path.exists(filename):
                 with open(filename, 'r') as f:
                     data = json.load(f)
-                    # Filtrare "din 2 în 2" pentru a aerisi jocul
                     self.beatmap = data[::2] 
-                print(f"[OK] Am încărcat și filtrat {len(self.beatmap)} note din {filename}.")
             else:
-                print(f"[!] Fișierul {filename} nu a fost găsit.")
+                pass
         except Exception as e:
-            print(f"[ERR] Eroare la citirea JSON: {e}")
+            pass
 
     def _reset_state(self):
         self.hit_tiles = {i: set() for i in range(4)}
@@ -84,20 +81,19 @@ class PianoTilesEngine:
         self.score_p1 = 0; self.misses_p1 = 0
         self.score_p2 = 0; self.misses_p2 = 0
         
-        # Oprim muzica dacă era deja pornită
         if self.audio_enabled and self.music_playing:
             pygame.mixer.music.stop()
             self.music_playing = False
 
     def get_score_report(self):
         if self.mode == '1':
-            return f"\n--- SCOR CO-OP ---\nHits: {self.score_p2}\nMisses: {self.misses_p2}\n------------------"
+            return f"--- SCOR CO-OP ---\nHits: {self.score_p2}\nMisses: {self.misses_p2}\n------------------"
         elif self.mode == '2':
-            return (f"\n--- SCOR 1v1 ---\n"
+            return (f"--- SCOR 1v1 ---\n"
                     f"P1 (SUS): {self.score_p1} Hits | {self.misses_p1} Misses\n"
                     f"P2 (JOS): {self.score_p2} Hits | {self.misses_p2} Misses\n"
                     f"-----------------")
-        return "Jocul este în așteptare."
+        return "[!] Jocul este în așteptare. Niciun scor disponibil."
 
     def process_input(self):
         if self.mode is None or self.is_pulsing:
@@ -147,7 +143,6 @@ class PianoTilesEngine:
         if self.mode is None or self.is_pulsing: return
         song_time = t - self.start_time
 
-        # Detecție Miss-uri automate
         for tile_id, tile in enumerate(self.beatmap):
             if song_time > tile['time'] + 0.3:
                 col = tile['column']
@@ -172,18 +167,13 @@ class PianoTilesEngine:
                 self.is_pulsing = False
                 self.start_time = time.time() 
                 
-                # --- START MUZICĂ ---
                 if self.audio_enabled and not self.music_playing:
                     try:
                         if os.path.exists(AUDIO_FILE):
                             pygame.mixer.music.load(AUDIO_FILE)
                             pygame.mixer.music.play()
                             self.music_playing = True
-                            print("[PLAY] Muzica a pornit!")
-                        else:
-                            print(f"[ERR] Nu găsesc fișierul audio: {AUDIO_FILE}")
-                    except Exception as e:
-                        print(f"[ERR] Eroare la redarea audio: {e}")
+                    except Exception: pass
 
         for y in range(HEIGHT):
             for x in range(WIDTH):
@@ -291,27 +281,61 @@ class NetworkManager:
             self.sock.sendto(bytearray([0x75, 0,0,0, 8, 2, 0,0, 0x55, 0x66, seq>>8, seq&0xFF, 0,0,0, 0x0E, 0]), (UDP_IP, UDP_PORT_SEND))
             time.sleep(0.04)
 
+# --- Funcții pentru Interfața din Terminal ---
+def clear_screen():
+    """Curăță terminalul în funcție de sistemul de operare (Windows sau Linux/Mac)"""
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+def print_menu(message=""):
+    """Curăță ecranul și reafişează comenzile, plus un mesaj opțional."""
+    clear_screen()
+    print("=== PIANO TILES (FULL SYNC) ===")
+    print("Comenzi disponibile:")
+    print("  1     - Pornește Mod Co-op (2x2)")
+    print("  2     - Pornește Mod 1v1 (1x1)")
+    print("  0     - Resetare / Oprire Joc")
+    print("  score - Afișează scorul curent")
+    print("  q     - Ieșire")
+    print("===============================")
+    
+    if message:
+        print(f"\n{message}")
+
 if __name__ == "__main__":
     game = PianoTilesEngine()
     net = NetworkManager(game)
     threading.Thread(target=net.run, daemon=True).start()
     
-    print("=== PIANO TILES (FULL SYNC) ===")
-    print("Comenzi: 1 (Co-op), 2 (1v1), 0 (Reset), score (Afișează scor), q (Ieșire)")
+    # Afișăm meniul curat la pornire
+    print_menu(f"[OK] S-au încărcat {len(game.beatmap)} note. Aștept comenzi.")
     
     try:
         while game.running:
-            cmd = input("> ").strip().lower()
-            if cmd == 'q': game.running = False
-            elif cmd == 'score': print(game.get_score_report())
+            cmd = input("\n> ").strip().lower()
+            
+            if cmd == 'q': 
+                game.running = False
+                
+            elif cmd == 'score': 
+                # Afișează scorul și păstrează meniul deasupra
+                print_menu(game.get_score_report())
+                
             elif cmd in ['1', '2']:
                 game.mode = cmd
                 game.is_pulsing = True
                 game._reset_state()
                 game.start_time = time.time()
+                mode_name = "Co-op" if cmd == '1' else "1v1"
+                print_menu(f"[*] Modul {mode_name} a fost pornit! Pregătește-te...")
+                
             elif cmd == '0':
                 game.mode = None
                 game._reset_state()
+                print_menu("[*] Jocul a fost resetat și este în așteptare.")
+                
+            else:
+                print_menu("[!] Comandă necunoscută. Folosește comenzile din listă.")
+                
     except KeyboardInterrupt: 
         game.running = False
     finally:
