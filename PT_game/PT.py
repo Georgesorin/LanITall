@@ -8,8 +8,8 @@ import random
 import pygame
 
 # --- Configurație Rețea Conform Documentației ---
-UDP_IP_BROADCAST = "255.255.255.255" # Pentru podeaua fizică
-UDP_IP_LOCAL = "127.0.0.1"           # Pentru simulator
+UDP_IP_BROADCAST = "255.255.255.255"
+UDP_IP_LOCAL = "127.0.0.1"           
 UDP_PORT_SEND = 1067
 UDP_PORT_RECV = 1069
 
@@ -19,7 +19,7 @@ FRAME_DATA_LENGTH = NUM_CHANNELS * LEDS_PER_CHANNEL * 3
 WIDTH, HEIGHT = 16, 32
 
 BEATMAP_FILE = "level.json"
-AUDIO_FILE = "Nightcore - Rockefeller Street (Lyrics).mp3"
+AUDIO_FILE = "Rockefeller Street, Nightcore Version (8-bitRockDrum & Bass) Remix.wav"
 
 PURPLE  = (154, 66, 255)
 CYAN    = (0, 255, 255)
@@ -33,10 +33,10 @@ LIGHT_GRAY = (200, 200, 200)
 TILE_COLS_M1 = [2, 5, 9, 12]
 TILE_COLS_M2 = [6, 7, 8, 9] 
 
-# Zone de hit
-HIT_ZONE_BOTTOM_COOP = (16, 31) # Super-forgiving pentru Co-op
-HIT_ZONE_BOTTOM = (22, 31)      # Pentru 1v1
-HIT_ZONE_TOP    = (0, 9)        # Pentru 1v1 P1
+# Zone de hit - Pentru iertare pe axa Y
+HIT_ZONE_BOTTOM_COOP = (16, 31) 
+HIT_ZONE_BOTTOM = (22, 31)      
+HIT_ZONE_TOP    = (0, 9)        
 FLASH_DURATION  = 0.20
 
 class PianoTilesEngine:
@@ -122,13 +122,11 @@ class PianoTilesEngine:
                 target_col_idx = None
                 
                 if self.mode == '1':
-                    # CO-OP FAT FOOT: Acceptă -1, 0, +1, +2 față de coloana de bază
                     for idx, ac in enumerate(active_cols):
                         if ac - 1 <= x <= ac + 2:
                             target_col_idx = idx
                             break
                 else:
-                    # 1v1 FAT FOOT: +/- 1 tile
                     if x in active_cols:
                         target_col_idx = active_cols.index(x)
                     else:
@@ -154,7 +152,6 @@ class PianoTilesEngine:
             time_diff = abs(song_time - target_time)
 
             if self.mode == '1':
-                # Timp de reacție masiv pentru Co-op (0.6 secunde)
                 if time_diff > 0.6: continue 
                 if tile_id not in self.hit_tiles[col]:
                     py = int(27 - (target_time - song_time) * self.speed)
@@ -295,7 +292,6 @@ class PianoTilesEngine:
                         py_f = 27 - (target_time - song_time) * self.speed
                         py = int(py_f)
                         
-                        # CO-OP 2x1 TILE (Aici se randează doar 1 pixel pe înălțime)
                         if y == py:
                             if tile_id in self.hit_tiles[json_col]:
                                 if (json_col, tile_id, 'down') in self.flash_hits: 
@@ -347,6 +343,7 @@ class PianoTilesEngine:
             buffer[offset + 8] = r
             buffer[offset + 16] = b
 
+
 # --- NETWORK MANAGER ---
 class NetworkManager:
     def __init__(self, game):
@@ -376,7 +373,6 @@ class NetworkManager:
         if self.sequence_number == 0: self.sequence_number = 1
         port = UDP_PORT_SEND
         
-        # --- 1. Start Packet ---
         rand1 = random.randint(0, 127)
         rand2 = random.randint(0, 127)
         start_packet = bytearray([
@@ -392,7 +388,6 @@ class NetworkManager:
             self.sock_send.sendto(start_packet, (UDP_IP_LOCAL, port))
         except: pass
 
-        # --- 2. FFF0 Packet ---
         fff0_payload = bytearray()
         for _ in range(NUM_CHANNELS):
             fff0_payload += bytes([(LEDS_PER_CHANNEL >> 8) & 0xFF, LEDS_PER_CHANNEL & 0xFF])
@@ -413,7 +408,6 @@ class NetworkManager:
             self.sock_send.sendto(fff0_packet, (UDP_IP_LOCAL, port))
         except: pass
         
-        # --- 3. Data Packets ---
         chunk_size = 984 
         data_packet_index = 1
         
@@ -442,7 +436,6 @@ class NetworkManager:
             data_packet_index += 1
             time.sleep(0.005) 
 
-        # --- 4. End Packet ---
         end_packet = bytearray([
             0x75, rand1, rand2, 0x00, 0x08,
             0x02, 0x00, 0x00, 0x55, 0x66,
@@ -506,13 +499,13 @@ class VisualInterface:
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_1:
                         self.game.mode = '1'
-                        self.game.speed = 7      # Mai lent și aerisit pentru Co-op
+                        self.game.speed = 7      # Viteza lentă pentru Co-op
                         self.game.is_pulsing = True
                         self.game._reset_state()
                         self.game.start_time = time.time()
                     elif event.key == pygame.K_2:
                         self.game.mode = '2'
-                        self.game.speed = 18     # Rămâne rapid pentru 1v1
+                        self.game.speed = 12     # Redus de la 18 pentru a fi mai accesibil fizic
                         self.game.is_pulsing = True
                         self.game._reset_state()
                         self.game.start_time = time.time()
