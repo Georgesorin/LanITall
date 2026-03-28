@@ -8,8 +8,6 @@ import random
 import wave
 import struct
 
-os.environ['SDL_AUDIODRIVER'] = 'pulse'
-
 try:
     import pygame
     PYGAME_AVAILABLE = True
@@ -17,15 +15,15 @@ except ImportError:
     PYGAME_AVAILABLE = False
 
 # --- Configurație Rețea ---
-UDP_IP = "255.255.255.255"
-UDP_PORT_SEND = 4626
-UDP_PORT_RECV = 7800
+UDP_IP = "127.0.0.1"
+UDP_PORT_SEND = 1067
+UDP_PORT_RECV = 1069
 WIDTH, HEIGHT = 16, 32
 FRAME_DATA_LENGTH = 8 * 64 * 3
 
 # --- Configurație Fișiere ---
 BEATMAP_FILE = "level.json"
-AUDIO_FILE = "Rockefeller Street, Nightcore Version (8-bitRockDrum & Bass) Remix.mp3"
+AUDIO_FILE = "Rockefeller Street, Nightcore Version (8-bitRockDrum & Bass) Remix.wav"
 
 # Culori
 PURPLE  = (154, 66, 255)
