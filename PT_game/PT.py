@@ -4,10 +4,12 @@ import threading
 import math
 import os
 import json
+import random
 import pygame
 
 # --- Configurație Rețea Conform Documentației ---
-UDP_IP = "127.0.0.1"
+UDP_IP_BROADCAST = "255.255.255.255" # Pentru podeaua fizică
+UDP_IP_LOCAL = "127.0.0.1"           # Pentru simulator
 UDP_PORT_SEND = 1067
 UDP_PORT_RECV = 1069
 
@@ -35,14 +37,6 @@ HIT_ZONE_BOTTOM = (24, 29)
 HIT_ZONE_TOP    = (2, 7)
 FLASH_DURATION  = 0.20
 
-PASSWORD_ARRAY = [
-    35, 63, 187, 69, 107, 178, 92, 76, 39, 69, 205, 37, 223, 255, 165, 231, 16, 220, 99, 61, 25, 203, 203, 155, 107, 30, 92, 144, 218, 194, 226, 88, 196, 190, 67, 195, 159, 185, 209, 24, 163, 65, 25, 172, 126, 63, 224, 61, 160, 80, 125, 91, 239, 144, 25, 141, 183, 204, 171, 188, 255, 162, 104, 225, 186, 91, 232, 3, 100, 208, 49, 211, 37, 192, 20, 99, 27, 92, 147, 152, 86, 177, 53, 153, 94, 177, 200, 33, 175, 195, 15, 228, 247, 18, 244, 150, 165, 229, 212, 96, 84, 200, 168, 191, 38, 112, 171, 116, 121, 186, 147, 203, 30, 118, 115, 159, 238, 139, 60, 57, 235, 213, 159, 198, 160, 50, 97, 201, 253, 242, 240, 77, 102, 12, 183, 235, 243, 247, 75, 90, 13, 236, 56, 133, 150, 128, 138, 190, 140, 13, 213, 18, 7, 117, 255, 45, 69, 214, 179, 50, 28, 66, 123, 239, 190, 73, 142, 218, 253, 5, 212, 174, 152, 75, 226, 226, 172, 78, 35, 93, 250, 238, 19, 32, 247, 223, 89, 123, 86, 138, 150, 146, 214, 192, 93, 152, 156, 211, 67, 51, 195, 165, 66, 10, 10, 31, 1, 198, 234, 135, 34, 128, 208, 200, 213, 169, 238, 74, 221, 208, 104, 170, 166, 36, 76, 177, 196, 3, 141, 167, 127, 56, 177, 203, 45, 107, 46, 82, 217, 139, 168, 45, 198, 6, 43, 11, 57, 88, 182, 84, 189, 29, 35, 143, 138, 171
-]
-
-def calc_checksum(data: bytes) -> int:
-    idx = sum(data) & 0xFF
-    return PASSWORD_ARRAY[idx]
-
 class PianoTilesEngine:
     def __init__(self):
         self.running = True
@@ -51,8 +45,9 @@ class PianoTilesEngine:
         self.is_pulsing = False
         self.speed = 10 
 
-        self.button_states = [False] * 64
-        self.prev_button_states = [False] * 64
+        # Extins la 512 pentru a citi toată podeaua fizică
+        self.button_states = [False] * 512
+        self.prev_button_states = [False] * 512
 
         # MATRICE VIZUALĂ PENTRU GUI
         self.display_matrix = [[BLACK for _ in range(WIDTH)] for _ in range(HEIGHT)]
@@ -99,11 +94,22 @@ class PianoTilesEngine:
         if self.mode is None or self.is_pulsing:
             self.prev_button_states = list(self.button_states)
             return
+            
         t = time.time()
-        for i in range(64):
+        active_cols = TILE_COLS_M1 if self.mode == '1' else TILE_COLS_M2
+        
+        for i in range(512):
             if self.button_states[i] and not self.prev_button_states[i]:
-                col = i % 4 
-                self._try_hit(col, t)
+                # Transformare din index fizic în coordonate (X, Y)
+                channel, local = i // 64, i % 64
+                row, col_raw = local // 16, local % 16
+                x = col_raw if row % 2 == 0 else 15 - col_raw
+                
+                # Verificăm dacă apăsarea e pe una din coloanele active
+                if x in active_cols:
+                    col_index = active_cols.index(x) 
+                    self._try_hit(col_index, t)
+                    
         self.prev_button_states = list(self.button_states)
 
     def _try_hit(self, col, current_t):
@@ -216,7 +222,7 @@ class PianoTilesEngine:
                     self.set_pixel(buffer, x, y, *BLACK)
                     continue
 
-                self.set_pixel(buffer, x, y, *BLACK) # Fundal default
+                self.set_pixel(buffer, x, y, *BLACK)
 
                 song_time = t - self.start_time
                 active_cols = TILE_COLS_M1 if self.mode == '1' else TILE_COLS_M2
@@ -276,7 +282,6 @@ class PianoTilesEngine:
     def set_pixel(self, buffer, target_x, target_y, r, g, b):
         if target_x < 0 or target_x >= WIDTH or target_y < 0 or target_y >= HEIGHT: return
         
-        # Salvează culoarea pentru GUI-ul Pygame
         self.display_matrix[target_y][target_x] = (r, g, b)
 
         channel = target_y // 4
@@ -292,13 +297,15 @@ class PianoTilesEngine:
             buffer[offset + 16] = b
 
 
-# --- NETWORK MANAGER ---
+# --- HARDWARE COMPLIANT NETWORK MANAGER ---
 class NetworkManager:
     def __init__(self, game):
         self.game = game
         self.sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock_send.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         self.sock_recv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.running = True
+        self.sequence_number = 0
         
         try:
             self.sock_recv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -307,37 +314,112 @@ class NetworkManager:
             print(f"[EROARE] Nu s-a putut lega portul de intrare {UDP_PORT_RECV}: {e}")
             self.running = False
 
-    def _transmit_payload(self, payload: bytes):
-        chk = calc_checksum(payload)
-        packet = payload + bytes([chk])
-        try:
-            self.sock_send.sendto(packet, (UDP_IP, UDP_PORT_SEND))
-        except Exception: pass
-
     def send_loop(self):
         while self.running and self.game.running:
             self.game.process_inputs()
             frame = self.game.render()
+            self.send_packet(frame)
+            time.sleep(0.05) 
+
+    def send_packet(self, frame_data):
+        self.sequence_number = (self.sequence_number + 1) & 0xFFFF
+        if self.sequence_number == 0: self.sequence_number = 1
+        
+        port = UDP_PORT_SEND
+        
+        # --- 1. Start Packet ---
+        rand1 = random.randint(0, 127)
+        rand2 = random.randint(0, 127)
+        start_packet = bytearray([
+            0x75, rand1, rand2, 0x00, 0x08, 
+            0x02, 0x00, 0x00, 0x33, 0x44,   
+            (self.sequence_number >> 8) & 0xFF, self.sequence_number & 0xFF,
+            0x00, 0x00, 0x00 
+        ])
+        start_packet.append(0x0E) 
+        start_packet.append(0x00) 
+        try: 
+            self.sock_send.sendto(start_packet, (UDP_IP_BROADCAST, port))
+            self.sock_send.sendto(start_packet, (UDP_IP_LOCAL, port))
+        except: pass
+
+        # --- 2. FFF0 Packet ---
+        fff0_payload = bytearray()
+        for _ in range(NUM_CHANNELS):
+            fff0_payload += bytes([(LEDS_PER_CHANNEL >> 8) & 0xFF, LEDS_PER_CHANNEL & 0xFF])
+
+        fff0_internal = bytearray([
+            0x02, 0x00, 0x00, 0x88, 0x77, 0xFF, 0xF0, 
+            (len(fff0_payload) >> 8) & 0xFF, (len(fff0_payload) & 0xFF)
+        ]) + fff0_payload
+        
+        fff0_len = len(fff0_internal) - 1
+        fff0_packet = bytearray([
+            0x75, rand1, rand2, (fff0_len >> 8) & 0xFF, (fff0_len & 0xFF)
+        ]) + fff0_internal
+        fff0_packet.append(0x1E) 
+        fff0_packet.append(0x00) 
+        
+        try: 
+            self.sock_send.sendto(fff0_packet, (UDP_IP_BROADCAST, port))
+            self.sock_send.sendto(fff0_packet, (UDP_IP_LOCAL, port))
+        except: pass
+        
+        # --- 3. Data Packets ---
+        chunk_size = 984 
+        data_packet_index = 1
+        
+        for i in range(0, len(frame_data), chunk_size):
+            chunk = frame_data[i:i+chunk_size]
+            internal_data = bytearray([
+                0x02, 0x00, 0x00, 
+                (0x8877 >> 8) & 0xFF, (0x8877 & 0xFF), 
+                (data_packet_index >> 8) & 0xFF, (data_packet_index & 0xFF), 
+                (len(chunk) >> 8) & 0xFF, (len(chunk) & 0xFF) 
+            ]) + chunk
             
-            self._transmit_payload(b"start")
-            self._transmit_payload(b"fff0")
+            payload_len = len(internal_data) - 1 
+            packet = bytearray([
+                0x75, rand1, rand2, (payload_len >> 8) & 0xFF, (payload_len & 0xFF)
+            ]) + internal_data
             
-            for i in range(0, len(frame), 984):
-                chunk = frame[i:i+984]
-                self._transmit_payload(b"data" + chunk)
-                time.sleep(0.002) 
-                
-            self._transmit_payload(b"end")
-            time.sleep(0.03) 
+            if len(chunk) == 984: packet.append(0x1E) 
+            else: packet.append(0x36) 
+            packet.append(0x00)
+            
+            try: 
+                self.sock_send.sendto(packet, (UDP_IP_BROADCAST, port))
+                self.sock_send.sendto(packet, (UDP_IP_LOCAL, port))
+            except: pass
+            
+            data_packet_index += 1
+            time.sleep(0.005) 
+
+        # --- 4. End Packet ---
+        end_packet = bytearray([
+            0x75, rand1, rand2, 0x00, 0x08,
+            0x02, 0x00, 0x00, 0x55, 0x66,
+            (self.sequence_number >> 8) & 0xFF, self.sequence_number & 0xFF,
+            0x00, 0x00, 0x00 
+        ])
+        end_packet.append(0x0E) 
+        end_packet.append(0x00) 
+        try: 
+            self.sock_send.sendto(end_packet, (UDP_IP_BROADCAST, port))
+            self.sock_send.sendto(end_packet, (UDP_IP_LOCAL, port))
+        except: pass
 
     def listen_loop(self):
         while self.running and self.game.running:
             try:
                 data, _ = self.sock_recv.recvfrom(2048)
-                if len(data) == 1400 and data[0] == 0x88:
-                    offset = 1200
-                    for i in range(64):
-                        self.game.button_states[i] = (data[offset + i] == 0xCC)
+                if len(data) >= 1373 and data[0] == 0x88:
+                    for ch in range(8):
+                        offset = 2 + (ch * 171) + 1 
+                        ch_data = data[offset : offset + 64] 
+                        for led_idx, val in enumerate(ch_data):
+                            global_idx = (ch * 64) + led_idx
+                            self.game.button_states[global_idx] = (val == 0xCC)
             except Exception: pass
 
     def start_bg(self):
@@ -353,7 +435,6 @@ class VisualInterface:
         self.game = game
         pygame.init()
         
-        # Dimensiuni: 16x32 grid + Panou lateral
         self.cell_size = 20
         self.grid_w = WIDTH * self.cell_size
         self.grid_h = HEIGHT * self.cell_size
@@ -392,20 +473,16 @@ class VisualInterface:
                     elif event.key == pygame.K_q:
                         self.game.running = False
 
-            # Fundal principal
             self.screen.fill((20, 20, 20))
 
-            # Desenare Matrice Simulator
             for y in range(HEIGHT):
                 for x in range(WIDTH):
                     color = self.game.display_matrix[y][x]
                     rect = (x * self.cell_size, y * self.cell_size, self.cell_size - 1, self.cell_size - 1)
                     pygame.draw.rect(self.screen, color, rect)
                     
-            # Linia despărțitoare
             pygame.draw.line(self.screen, GRAY, (self.grid_w, 0), (self.grid_w, self.grid_h), 2)
 
-            # Desenare Panou Control
             px = self.grid_w + 20
             self.draw_text("PIANO TILES MATRIX", self.font_large, CYAN, px, 20)
             
@@ -413,13 +490,11 @@ class VisualInterface:
             self.draw_text(f"Status: {mode_str}", self.font_small, YELLOW, px, 60)
             self.draw_text(f"Tiles Rămase/Total: {len(self.game.beatmap)}", self.font_small, WHITE, px, 85)
 
-            # Statistici / Scor
             if self.game.mode == '1':
                 self.draw_text("Scor CO-OP:", self.font_large, GREEN, px, 140)
                 self.draw_text(f"Hits: {self.game.score_p2}", self.font_small, WHITE, px, 180)
                 self.draw_text(f"Misses: {self.game.misses_p2}", self.font_small, WHITE, px, 205)
                 
-                # Afișare Misses exact cum ai cerut
                 missed_p2_list = [t for col in self.game.miss_tiles.values() for t in col]
                 if missed_p2_list:
                     self.draw_text("Tile-uri ratate (ID):", self.font_small, (255, 100, 100), px, 240)
@@ -436,7 +511,6 @@ class VisualInterface:
                 missed_p2_list = sorted([int(t.split('_')[1]) for col in self.game.miss_tiles.values() for t in col if str(t).startswith('d_')])
                 if missed_p2_list: self.draw_text(f"Ratări: {str(missed_p2_list[:10])}", self.font_small, WHITE, px, 315)
 
-            # Meniu Comenzi (Jos)
             self.draw_text("Comenzi Tastatură:", self.font_large, WHITE, px, 450)
             self.draw_text("[1] - Start Mod Co-op", self.font_small, LIGHT_GRAY, px, 490)
             self.draw_text("[2] - Start Mod 1v1", self.font_small, LIGHT_GRAY, px, 515)
@@ -444,17 +518,14 @@ class VisualInterface:
             self.draw_text("[Q] - Închide Aplicația", self.font_small, LIGHT_GRAY, px, 565)
             
             pygame.display.flip()
-            self.clock.tick(30) # Rulează la 30 FPS
-
+            self.clock.tick(30) 
 
 if __name__ == "__main__":
     game = PianoTilesEngine()
     net = NetworkManager(game)
     
-    # Pornim thread-urile de rețea în fundal
     net.start_bg()
     
-    # Pornim interfața grafică pe thread-ul principal
     try:
         gui = VisualInterface(game)
         gui.run()
