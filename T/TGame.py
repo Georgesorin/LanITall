@@ -6,11 +6,15 @@ import math
 import json
 import tkinter as tk
 import queue
+import pygame
+
+# Inițializare modul de sunet
+pygame.mixer.init()
 
 # --- Setări de Rețea UDP Matrice ---
 UDP_SEND_IP = "255.255.255.255"
-UDP_SEND_PORT = 4626
-UDP_LISTEN_PORT = 7800
+UDP_SEND_PORT = 1068
+UDP_LISTEN_PORT = 1070
 
 # --- Setari Retea GUI (Local IPC) ---
 GUI_SEND_PORT = 1071
@@ -34,45 +38,14 @@ YELLOW  = (255, 255, 0)
 CYAN    = (0, 255, 255)
 WHITE   = (255, 255, 255)
 
-# --- Font Data - Numere Masive, Litere și Caractere Mici ---
+# --- Font Data ---
 FONT = {
-    # Numere Masive pentru Countdown
-    1: [(3,0), (4,0), (2,1), (3,1), (4,1), (1,2), (2,2), (3,2), (4,2),
-        (3,3), (4,3), (3,4), (4,4), (3,5), (4,5), (3,6), (4,6),
-        (3,7), (4,7), (3,8), (4,8), (3,9), (4,9), (3,10), (4,10),
-        (1,11), (2,11), (3,11), (4,11), (5,11), (6,11)],
-
-    2: [(1,0), (2,0), (3,0), (4,0), (5,0), (6,0),
-        (0,1), (1,1), (6,1), (7,1),
-        (0,2), (1,2), (6,2), (7,2),
-        (6,3), (7,3),
-        (5,4), (6,4),
-        (4,5), (5,5),
-        (3,6), (4,6),
-        (2,7), (3,7),
-        (1,8), (2,8),
-        (0,9), (1,9),
-        (0,10), (1,10),
-        (0,11), (1,11), (2,11), (3,11), (4,11), (5,11), (6,11), (7,11)],
-
-    3: [(1,0), (2,0), (3,0), (4,0), (5,0), (6,0),
-        (0,1), (1,1), (6,1), (7,1),
-        (0,2), (1,2), (6,2), (7,2),
-        (6,3), (7,3),
-        (4,4), (5,4), (6,4),
-        (2,5), (3,5), (4,5), (5,5),
-        (4,6), (5,6), (6,6),
-        (6,7), (7,7),
-        (6,8), (7,8),
-        (0,9), (1,9), (6,9), (7,9),
-        (0,10), (1,10), (6,10), (7,10),
-        (1,11), (2,11), (3,11), (4,11), (5,11), (6,11)],
-
+    1: [(3,0), (4,0), (2,1), (3,1), (4,1), (1,2), (2,2), (3,2), (4,2), (3,3), (4,3), (3,4), (4,4), (3,5), (4,5), (3,6), (4,6), (3,7), (4,7), (3,8), (4,8), (3,9), (4,9), (3,10), (4,10), (1,11), (2,11), (3,11), (4,11), (5,11), (6,11)],
+    2: [(1,0), (2,0), (3,0), (4,0), (5,0), (6,0), (0,1), (1,1), (6,1), (7,1), (0,2), (1,2), (6,2), (7,2), (6,3), (7,3), (5,4), (6,4), (4,5), (5,5), (3,6), (4,6), (2,7), (3,7), (1,8), (2,8), (0,9), (1,9), (0,10), (1,10), (0,11), (1,11), (2,11), (3,11), (4,11), (5,11), (6,11), (7,11)],
+    3: [(1,0), (2,0), (3,0), (4,0), (5,0), (6,0), (0,1), (1,1), (6,1), (7,1), (0,2), (1,2), (6,2), (7,2), (6,3), (7,3), (4,4), (5,4), (6,4), (2,5), (3,5), (4,5), (5,5), (4,6), (5,6), (6,6), (6,7), (7,7), (6,8), (7,8), (0,9), (1,9), (6,9), (7,9), (0,10), (1,10), (6,10), (7,10), (1,11), (2,11), (3,11), (4,11), (5,11), (6,11)],
     'W': [(0,0),(0,1),(0,2),(0,3),(0,4), (4,0),(4,1),(4,2),(4,3),(4,4), (1,3),(2,2),(3,3)],
     'I': [(0,0),(1,0),(2,0), (1,1),(1,2),(1,3), (0,4),(1,4),(2,4)],
     'N': [(0,0),(0,1),(0,2),(0,3),(0,4), (3,0),(3,1),(3,2),(3,3),(3,4), (1,1),(2,2)],
-
-    # Caractere 3x5 pentru scoruri (Px +1)
     'P': [(0,0),(1,0),(2,0), (0,1),(2,1), (0,2),(1,2),(2,2), (0,3), (0,4)],
     '+': [(1,1), (0,2),(1,2),(2,2), (1,3)],
     '1': [(1,0), (0,1),(1,1), (1,2), (1,3), (0,4),(1,4),(2,4)],
@@ -85,7 +58,6 @@ FONT = {
     '8': [(0,0),(1,0),(2,0), (0,1),(2,1), (0,2),(1,2),(2,2), (0,3),(2,3), (0,4),(1,4),(2,4)]
 }
 
-# --- Tabel Parolă (Checksum) ---
 PASSWORD_ARRAY = [
     35, 63, 187, 69, 107, 178, 92, 76, 39, 69, 205, 37, 223, 255, 165, 231, 16, 220, 99, 61, 25, 203, 203,
     155, 107, 30, 92, 144, 218, 194, 226, 88, 196, 190, 67, 195, 159, 185, 209, 24, 163, 65, 25, 172, 126,
@@ -104,7 +76,6 @@ PASSWORD_ARRAY = [
 def calculate_checksum(data_bytes):
     return PASSWORD_ARRAY[sum(data_bytes) & 0xFF]
 
-# --- Helpers pentru Matrice ---
 def set_pixel(buffer, target_x, target_y, r, g, b):
     if target_x < 0 or target_x >= 16 or target_y < 0 or target_y >= 32: return
     channel = target_y // 4
@@ -133,36 +104,25 @@ def draw_symbol(buffer, symbol, offset_x, offset_y, color):
         for px, py in FONT[symbol]:
             set_pixel(buffer, offset_x + px, offset_y + py, *color)
 
-# --- Generare Traseu Spirală ---
 def generate_playable_spiral():
     coords = []
     top, bottom = 2, 29
     left, right = 2, 13
-
     while top <= bottom and left <= right:
-        for x in range(left, right + 1):
-            coords.append((x, top))
+        for x in range(left, right + 1): coords.append((x, top))
         top += 1
-
-        for y in range(top, bottom + 1):
-            coords.append((right, y))
+        for y in range(top, bottom + 1): coords.append((right, y))
         right -= 1
-
         if top <= bottom:
-            for x in range(right, left - 1, -1):
-                coords.append((x, bottom))
+            for x in range(right, left - 1, -1): coords.append((x, bottom))
             bottom -= 1
-
         if left <= right:
-            for y in range(bottom, top - 1, -1):
-                coords.append((left, y))
+            for y in range(bottom, top - 1, -1): coords.append((left, y))
             left += 1
-
     return coords
 
 SPIRAL_PATH = generate_playable_spiral()
 
-# --- Core Game Logic ---
 class SequenceGame:
     def __init__(self):
         self.running = True
@@ -182,7 +142,13 @@ class SequenceGame:
         self.wrong_tile = None
 
         self.is_final_win = False
-        self.round_winner = 1 # Reține cine a câștigat ultima rundă
+        self.round_winner = 1
+
+    def play_sound(self, filename):
+        try:
+            pygame.mixer.Sound(f"_sfx/{filename}").play()
+        except Exception:
+            pass
 
     def start_game(self, num_players, reset_scores=True):
         if not (2 <= num_players <= 8):
@@ -228,16 +194,18 @@ class SequenceGame:
         remaining = self.active_players.count(True)
         if remaining == 1:
             winner_idx = self.active_players.index(True)
-            self.round_winner = winner_idx + 1 # Salvam câștigătorul pentru animație
+            self.round_winner = winner_idx + 1
             self.scores[winner_idx] += 1
             winner_num = self.round_winner
 
             if self.scores[winner_idx] >= 3:
                 print(f"\n🎉 JUCĂTORUL {winner_num} A AJUNS LA 3 PUNCTE ȘI A CÂȘTIGAT JOCUL SUPREM! 🎉")
                 self.is_final_win = True
+                self.play_sound("game_win.wav")
             else:
                 print(f"\n🏆 Jucătorul {winner_num} a câștigat runda! (Scor curent: {self.scores[winner_idx]}/3) 🏆")
                 self.is_final_win = False
+                self.play_sound("round_win.wav")
 
             self.state = "SHOW_WIN"
             self.state_time = time.time()
@@ -282,6 +250,8 @@ class SequenceGame:
                 if self.current_step < len(self.sequence):
                     expected_tile = self.sequence[self.current_step]
                     if (x, y) == expected_tile:
+                        # Redă sunetul din secvența existentă
+                        self.play_sound(f"note_{self.current_step}.wav")
                         self.current_step += 1
                     elif (x, y) in self.sequence:
                         pass
@@ -290,12 +260,15 @@ class SequenceGame:
                         self.state_time = now
                         self.wrong_tile = (x, y)
                         print(f"Greșeală! S-a apăsat {(x, y)} în loc de {expected_tile}.")
+                        self.play_sound("fail.wav")
                         break
                 else:
                     if (x, y) in self.sequence:
                         pass
                     else:
+                        # S-a adăugat un tile nou la secvență. Va reda DOAR nota din gamă.
                         self.sequence.append((x, y))
+                        self.play_sound(f"note_{self.current_step}.wav")
                         self.current_step += 1
                         self.state = "TURN_SUCCESS"
                         self.state_time = now
@@ -333,22 +306,18 @@ class SequenceGame:
             if self.is_final_win:
                 anim_color = MAGENTA if elapsed_ms % 2 == 0 else WHITE
 
-                # Desenează "WIN" centrat sus
                 draw_symbol(buffer, 'W', 1, 8, anim_color)
                 draw_symbol(buffer, 'I', 7, 8, anim_color)
                 draw_symbol(buffer, 'N', 11, 8, anim_color)
 
-                # Desenează "Px" centrat jos
                 draw_symbol(buffer, 'P', 4, 18, anim_color)
                 draw_symbol(buffer, str(self.round_winner), 9, 18, anim_color)
             else:
                 anim_color = MAGENTA if elapsed_ms % 4 < 2 else WHITE
 
-                # Desenează "Px" centrat sus
                 draw_symbol(buffer, 'P', 4, 10, anim_color)
                 draw_symbol(buffer, str(self.round_winner), 9, 10, anim_color)
 
-                # Desenează "+1" centrat jos
                 draw_symbol(buffer, '+', 4, 18, anim_color)
                 draw_symbol(buffer, '1', 9, 18, anim_color)
 

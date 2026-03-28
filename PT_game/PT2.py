@@ -8,26 +8,27 @@ import pygame
 
 # --- Configurație Rețea Conform Documentației ---
 UDP_IP = "127.0.0.1"
-UDP_PORT_SEND = 1067
-UDP_PORT_RECV = 1069
+UDP_PORT_SEND = 4626 # Portul oficial de trimitere Matrix
+UDP_PORT_RECV = 7800 # Portul oficial de primire touch-events
 
+# Structura hardware
 NUM_CHANNELS = 8
 LEDS_PER_CHANNEL = 64
 FRAME_DATA_LENGTH = NUM_CHANNELS * LEDS_PER_CHANNEL * 3 
 WIDTH, HEIGHT = 16, 32
 
+# --- Configurație Fișiere ---
 BEATMAP_FILE = "level.json"
-AUDIO_FILE = "Nightcore - Rockefeller Street (Lyrics).mp3"
+AUDIO_FILE = "Rockefeller Street, Nightcore Version (8-bitRockDrum & Bass) Remix.mp3"
 
+# --- Culori ---
 PURPLE  = (154, 66, 255)
 CYAN    = (0, 255, 255)
 GREEN   = (0, 255, 0)
 YELLOW  = (255, 220, 0)
 BLACK   = (0, 0, 0)
-WHITE   = (255, 255, 255)
-GRAY    = (40, 40, 40)
-LIGHT_GRAY = (200, 200, 200)
 
+# --- Configurație Moduri Piano Tiles ---
 TILE_COLS_M1 = [2, 5, 9, 12]
 TILE_COLS_M2 = [6, 7, 8, 9] 
 
@@ -35,13 +36,16 @@ HIT_ZONE_BOTTOM = (24, 29)
 HIT_ZONE_TOP    = (2, 7)
 FLASH_DURATION  = 0.20
 
+# --- Securitate Matrix (Checksum Array) ---
 PASSWORD_ARRAY = [
     35, 63, 187, 69, 107, 178, 92, 76, 39, 69, 205, 37, 223, 255, 165, 231, 16, 220, 99, 61, 25, 203, 203, 155, 107, 30, 92, 144, 218, 194, 226, 88, 196, 190, 67, 195, 159, 185, 209, 24, 163, 65, 25, 172, 126, 63, 224, 61, 160, 80, 125, 91, 239, 144, 25, 141, 183, 204, 171, 188, 255, 162, 104, 225, 186, 91, 232, 3, 100, 208, 49, 211, 37, 192, 20, 99, 27, 92, 147, 152, 86, 177, 53, 153, 94, 177, 200, 33, 175, 195, 15, 228, 247, 18, 244, 150, 165, 229, 212, 96, 84, 200, 168, 191, 38, 112, 171, 116, 121, 186, 147, 203, 30, 118, 115, 159, 238, 139, 60, 57, 235, 213, 159, 198, 160, 50, 97, 201, 253, 242, 240, 77, 102, 12, 183, 235, 243, 247, 75, 90, 13, 236, 56, 133, 150, 128, 138, 190, 140, 13, 213, 18, 7, 117, 255, 45, 69, 214, 179, 50, 28, 66, 123, 239, 190, 73, 142, 218, 253, 5, 212, 174, 152, 75, 226, 226, 172, 78, 35, 93, 250, 238, 19, 32, 247, 223, 89, 123, 86, 138, 150, 146, 214, 192, 93, 152, 156, 211, 67, 51, 195, 165, 66, 10, 10, 31, 1, 198, 234, 135, 34, 128, 208, 200, 213, 169, 238, 74, 221, 208, 104, 170, 166, 36, 76, 177, 196, 3, 141, 167, 127, 56, 177, 203, 45, 107, 46, 82, 217, 139, 168, 45, 198, 6, 43, 11, 57, 88, 182, 84, 189, 29, 35, 143, 138, 171
 ]
 
 def calc_checksum(data: bytes) -> int:
+    """Calculează indexul de paritate validând buffer-ul."""
     idx = sum(data) & 0xFF
     return PASSWORD_ARRAY[idx]
+
 
 class PianoTilesEngine:
     def __init__(self):
@@ -49,13 +53,10 @@ class PianoTilesEngine:
         self.mode = None       
         self.start_time = 0
         self.is_pulsing = False
-        self.speed = 10 
+        self.speed = 5 
 
         self.button_states = [False] * 64
         self.prev_button_states = [False] * 64
-
-        # MATRICE VIZUALĂ PENTRU GUI
-        self.display_matrix = [[BLACK for _ in range(WIDTH)] for _ in range(HEIGHT)]
 
         self.audio_enabled = False
         self.music_playing = False
@@ -80,7 +81,7 @@ class PianoTilesEngine:
             if os.path.exists(filename):
                 with open(filename, 'r') as f:
                     data = json.load(f)
-                    self.beatmap = data[::1]
+                    self.beatmap = data[::2]
         except Exception:
             pass
 
@@ -94,6 +95,25 @@ class PianoTilesEngine:
         if self.audio_enabled and self.music_playing:
             pygame.mixer.music.stop()
             self.music_playing = False
+
+    def get_score_report(self):
+        if self.mode == '1':
+            missed_p2_list = [tile for col in self.miss_tiles.values() for tile in col]
+            return (f"\n--- SCOR CO-OP ---\n"
+                    f"Hits: {self.score_p2}\n"
+                    f"Misses: {self.misses_p2}\n"
+                    f"Tile-uri ratate (ID-uri): {sorted(missed_p2_list)}\n"
+                    f"------------------")
+        elif self.mode == '2':
+            missed_p1_list = [t for col in self.miss_tiles.values() for t in col if str(t).startswith('u_')]
+            missed_p2_list = [t for col in self.miss_tiles.values() for t in col if str(t).startswith('d_')]
+            return (f"\n--- SCOR 1v1 ---\n"
+                    f"P1 (SUS): {self.score_p1} Hits | {self.misses_p1} Misses\n"
+                    f"  -> Tile-uri ratate: {sorted([int(t.split('_')[1]) for t in missed_p1_list])}\n"
+                    f"P2 (JOS): {self.score_p2} Hits | {self.misses_p2} Misses\n"
+                    f"  -> Tile-uri ratate: {sorted([int(t.split('_')[1]) for t in missed_p2_list])}\n"
+                    f"-----------------")
+        return "Jocul este în așteptare."
 
     def process_inputs(self):
         if self.mode is None or self.is_pulsing:
@@ -212,11 +232,7 @@ class PianoTilesEngine:
                     self.set_pixel(buffer, x, y, c[0], c[1], c[2])
                     continue
 
-                if self.is_pulsing: 
-                    self.set_pixel(buffer, x, y, *BLACK)
-                    continue
-
-                self.set_pixel(buffer, x, y, *BLACK) # Fundal default
+                if self.is_pulsing: continue
 
                 song_time = t - self.start_time
                 active_cols = TILE_COLS_M1 if self.mode == '1' else TILE_COLS_M2
@@ -274,11 +290,8 @@ class PianoTilesEngine:
         return buffer
 
     def set_pixel(self, buffer, target_x, target_y, r, g, b):
+        """Scrierea datelor de ecran per pixel, respectând aliniamentul Zig-Zag GRB (Secțiunea 2)."""
         if target_x < 0 or target_x >= WIDTH or target_y < 0 or target_y >= HEIGHT: return
-        
-        # Salvează culoarea pentru GUI-ul Pygame
-        self.display_matrix[target_y][target_x] = (r, g, b)
-
         channel = target_y // 4
         if channel >= NUM_CHANNELS: return
         
@@ -292,7 +305,7 @@ class PianoTilesEngine:
             buffer[offset + 16] = b
 
 
-# --- NETWORK MANAGER ---
+# --- NETWORK MANAGER (Actualizat pentru Port 4626/7800 și Verificare Paritate) ---
 class NetworkManager:
     def __init__(self, game):
         self.game = game
@@ -302,19 +315,23 @@ class NetworkManager:
         
         try:
             self.sock_recv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            # Secțiunea 4: Receptorul ascultă exclusiv portul 7800
             self.sock_recv.bind(("0.0.0.0", UDP_PORT_RECV))
         except Exception as e:
             print(f"[EROARE] Nu s-a putut lega portul de intrare {UDP_PORT_RECV}: {e}")
             self.running = False
 
     def _transmit_payload(self, payload: bytes):
+        """Aplică Checksum-ul dinamic la finalul payload-ului (Secțiunea 1)"""
         chk = calc_checksum(payload)
         packet = payload + bytes([chk])
         try:
             self.sock_send.sendto(packet, (UDP_IP, UDP_PORT_SEND))
-        except Exception: pass
+        except Exception:
+            pass
 
     def send_loop(self):
+        """Ciclul de trimitere, izolând pachetele cu Chunking de 984 bytes și delay (Secțiunea 3)"""
         while self.running and self.game.running:
             self.game.process_inputs()
             frame = self.game.render()
@@ -325,144 +342,83 @@ class NetworkManager:
             for i in range(0, len(frame), 984):
                 chunk = frame[i:i+984]
                 self._transmit_payload(b"data" + chunk)
-                time.sleep(0.002) 
+                time.sleep(0.002) # Sub-chunk delay strict 2ms conform documentației
                 
             self._transmit_payload(b"end")
-            time.sleep(0.03) 
+            time.sleep(0.03) # Menținem un delay adițional minimal pentru frame-rate (aprox 30 FPS)
 
     def listen_loop(self):
+        """Buclează constant așteptând interacțiunile fizice (Touch Matrix) (Secțiunea 4)"""
         while self.running and self.game.running:
             try:
                 data, _ = self.sock_recv.recvfrom(2048)
+                # Parsează doar pachetele corecte (lungime 1400, header 0x88)
                 if len(data) == 1400 and data[0] == 0x88:
                     offset = 1200
                     for i in range(64):
+                        # Înregistrăm atingerea dacă flag-ul 0xCC este validat pe index
                         self.game.button_states[i] = (data[offset + i] == 0xCC)
-            except Exception: pass
+            except Exception:
+                pass
 
     def start_bg(self):
+        """Rulează procesele strict în background de tip Daemon (Secțiunea 6)"""
         t1 = threading.Thread(target=self.send_loop, daemon=True)
         t2 = threading.Thread(target=self.listen_loop, daemon=True)
         t1.start()
         t2.start()
 
 
-# --- GUI PYGAME ---
-class VisualInterface:
-    def __init__(self, game):
-        self.game = game
-        pygame.init()
-        
-        # Dimensiuni: 16x32 grid + Panou lateral
-        self.cell_size = 20
-        self.grid_w = WIDTH * self.cell_size
-        self.grid_h = HEIGHT * self.cell_size
-        self.panel_w = 300
-        
-        self.screen = pygame.display.set_mode((self.grid_w + self.panel_w, self.grid_h))
-        pygame.display.set_caption("Matrix Piano Tiles - Control Panel")
-        
-        self.font_large = pygame.font.SysFont("Segoe UI", 24, bold=True)
-        self.font_small = pygame.font.SysFont("Segoe UI", 16)
-        self.clock = pygame.time.Clock()
+# --- Interfața din Terminal ---
+def clear_screen():
+    os.system('cls' if os.name == 'nt' else 'clear')
 
-    def draw_text(self, text, font, color, x, y):
-        surface = font.render(text, True, color)
-        self.screen.blit(surface, (x, y))
-
-    def run(self):
-        while self.game.running:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.game.running = False
-                elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_1:
-                        self.game.mode = '1'
-                        self.game.is_pulsing = True
-                        self.game._reset_state()
-                        self.game.start_time = time.time()
-                    elif event.key == pygame.K_2:
-                        self.game.mode = '2'
-                        self.game.is_pulsing = True
-                        self.game._reset_state()
-                        self.game.start_time = time.time()
-                    elif event.key == pygame.K_0:
-                        self.game.mode = None
-                        self.game._reset_state()
-                    elif event.key == pygame.K_q:
-                        self.game.running = False
-
-            # Fundal principal
-            self.screen.fill((20, 20, 20))
-
-            # Desenare Matrice Simulator
-            for y in range(HEIGHT):
-                for x in range(WIDTH):
-                    color = self.game.display_matrix[y][x]
-                    rect = (x * self.cell_size, y * self.cell_size, self.cell_size - 1, self.cell_size - 1)
-                    pygame.draw.rect(self.screen, color, rect)
-                    
-            # Linia despărțitoare
-            pygame.draw.line(self.screen, GRAY, (self.grid_w, 0), (self.grid_w, self.grid_h), 2)
-
-            # Desenare Panou Control
-            px = self.grid_w + 20
-            self.draw_text("PIANO TILES MATRIX", self.font_large, CYAN, px, 20)
-            
-            mode_str = "Co-op (2x2)" if self.game.mode == '1' else "1v1 (1x1)" if self.game.mode == '2' else "Așteptare"
-            self.draw_text(f"Status: {mode_str}", self.font_small, YELLOW, px, 60)
-            self.draw_text(f"Tiles Rămase/Total: {len(self.game.beatmap)}", self.font_small, WHITE, px, 85)
-
-            # Statistici / Scor
-            if self.game.mode == '1':
-                self.draw_text("Scor CO-OP:", self.font_large, GREEN, px, 140)
-                self.draw_text(f"Hits: {self.game.score_p2}", self.font_small, WHITE, px, 180)
-                self.draw_text(f"Misses: {self.game.misses_p2}", self.font_small, WHITE, px, 205)
-                
-                # Afișare Misses exact cum ai cerut
-                missed_p2_list = [t for col in self.game.miss_tiles.values() for t in col]
-                if missed_p2_list:
-                    self.draw_text("Tile-uri ratate (ID):", self.font_small, (255, 100, 100), px, 240)
-                    self.draw_text(str(sorted(missed_p2_list)[:15]) + ("..." if len(missed_p2_list)>15 else ""), self.font_small, WHITE, px, 260)
-
-            elif self.game.mode == '2':
-                self.draw_text("Scor P1 (Sus):", self.font_large, PURPLE, px, 140)
-                self.draw_text(f"Hits: {self.game.score_p1} | Misses: {self.game.misses_p1}", self.font_small, WHITE, px, 180)
-                missed_p1_list = sorted([int(t.split('_')[1]) for col in self.game.miss_tiles.values() for t in col if str(t).startswith('u_')])
-                if missed_p1_list: self.draw_text(f"Ratări: {str(missed_p1_list[:10])}", self.font_small, WHITE, px, 205)
-
-                self.draw_text("Scor P2 (Jos):", self.font_large, CYAN, px, 250)
-                self.draw_text(f"Hits: {self.game.score_p2} | Misses: {self.game.misses_p2}", self.font_small, WHITE, px, 290)
-                missed_p2_list = sorted([int(t.split('_')[1]) for col in self.game.miss_tiles.values() for t in col if str(t).startswith('d_')])
-                if missed_p2_list: self.draw_text(f"Ratări: {str(missed_p2_list[:10])}", self.font_small, WHITE, px, 315)
-
-            # Meniu Comenzi (Jos)
-            self.draw_text("Comenzi Tastatură:", self.font_large, WHITE, px, 450)
-            self.draw_text("[1] - Start Mod Co-op", self.font_small, LIGHT_GRAY, px, 490)
-            self.draw_text("[2] - Start Mod 1v1", self.font_small, LIGHT_GRAY, px, 515)
-            self.draw_text("[0] - Oprește / Așteptare", self.font_small, LIGHT_GRAY, px, 540)
-            self.draw_text("[Q] - Închide Aplicația", self.font_small, LIGHT_GRAY, px, 565)
-            
-            pygame.display.flip()
-            self.clock.tick(30) # Rulează la 30 FPS
-
+def print_menu(message=""):
+    clear_screen()
+    print("=== PIANO TILES (MATRIX SYNC) ===")
+    print("Comenzi disponibile:")
+    print("  1     - Pornește Mod Co-op (2x2)")
+    print("  2     - Pornește Mod 1v1 (1x1)")
+    print("  0     - Resetare / Oprire Joc")
+    print("  score - Afișează scorul curent")
+    print("  q     - Ieșire")
+    print("=================================")
+    
+    if message:
+        print(f"\n{message}")
 
 if __name__ == "__main__":
     game = PianoTilesEngine()
     net = NetworkManager(game)
-    
-    # Pornim thread-urile de rețea în fundal
     net.start_bg()
     
-    # Pornim interfața grafică pe thread-ul principal
+    print_menu(f"[OK] Sistem pregătit. Tile-uri reținute: {len(game.beatmap)}")
+    
     try:
-        gui = VisualInterface(game)
-        gui.run()
-    except KeyboardInterrupt:
-        pass
-    finally:
+        while game.running:
+            cmd = input("\n> ").strip().lower()
+            
+            if cmd == 'q': 
+                game.running = False
+            elif cmd == 'score': 
+                print_menu(game.get_score_report())
+            elif cmd in ['1', '2']:
+                game.mode = cmd
+                game.is_pulsing = True
+                game._reset_state()
+                game.start_time = time.time()
+                mode_name = "Co-op" if cmd == '1' else "1v1"
+                print_menu(f"[*] Modul {mode_name} a fost pornit! Pregătește-te...")
+            elif cmd == '0':
+                game.mode = None
+                game._reset_state()
+                print_menu("[*] Jocul a fost resetat și este în așteptare.")
+            else:
+                print_menu("[!] Comandă necunoscută. Folosește comenzile din listă.")
+                
+    except KeyboardInterrupt: 
         game.running = False
+    finally:
         net.running = False
         if game.audio_enabled:
             pygame.mixer.quit()
-        pygame.quit()
