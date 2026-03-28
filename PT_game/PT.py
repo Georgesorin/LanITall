@@ -4,7 +4,15 @@ import threading
 import math
 import os
 import json
-import pygame
+import random
+import wave
+import struct
+
+try:
+    import pygame
+    PYGAME_AVAILABLE = True
+except ImportError:
+    PYGAME_AVAILABLE = False
 
 # --- Configurație Rețea ---
 UDP_IP = "127.0.0.1"
@@ -24,36 +32,144 @@ GREEN   = (0, 255, 0)
 YELLOW  = (255, 220, 0)
 BLACK   = (0, 0, 0)
 
-# Configurație Moduri
-TILE_COLS_M1 = [2, 5, 9, 12] # Coloane pentru 2x2
-TILE_COLS_M2 = [6, 7, 8, 9]  # Coloane centrale pentru 1x1
+TILE_COLS_M1 = [2, 5, 9, 12]
+TILE_COLS_M2 = [6, 7, 8, 9] 
 
 HIT_ZONE_BOTTOM = (26, 29)
 HIT_ZONE_TOP    = (2, 5)
 FLASH_DURATION  = 0.15
 
+# ==========================================
+# 1. GENERATOR DE EFECTE AUDIO (8-BIT)
+# ==========================================
+class SFXGenerator:
+    SFX_DIR = "_sfx"
+
+    @classmethod
+    def save_wav(cls, filename, data, sample_rate=44100):
+        if not os.path.exists(cls.SFX_DIR):
+            os.makedirs(cls.SFX_DIR)
+            
+        path = os.path.join(cls.SFX_DIR, filename)
+        with wave.open(path, 'w') as f:
+            f.setnchannels(1)
+            f.setsampwidth(1) # 8-bit audio
+            f.setframerate(sample_rate)
+            f.writeframes(data)
+
+    @classmethod
+    def generate_tone(cls, freq, duration, vol=0.5, type='sine', slide=0):
+        sample_rate = 44100
+        n_samples = int(sample_rate * duration)
+        data = bytearray()
+        
+        for i in range(n_samples):
+            t = i / sample_rate
+            cur_freq = freq + slide * t
+            
+            if type == 'sine':
+                val = math.sin(2 * math.pi * cur_freq * t)
+            elif type == 'square':
+                val = 1.0 if math.sin(2 * math.pi * cur_freq * t) > 0 else -1.0
+            elif type == 'saw':
+                val = 2.0 * (t * cur_freq - math.floor(0.5 + t * cur_freq))
+            elif type == 'noise':
+                val = random.uniform(-1, 1)
+                
+            scaled = int((val * vol + 1.0) * 127.5)
+            scaled = max(0, min(255, scaled))
+            data.append(scaled)
+            
+        return data
+
+    @classmethod
+    def generate_all(cls):
+        if not os.path.exists(cls.SFX_DIR):
+            os.makedirs(cls.SFX_DIR)
+            
+        # Generăm sunet de HIT (un ping scurt și ascuțit)
+        hit_sound = cls.generate_tone(600, 0.05, vol=0.3, type='square', slide=500)
+        cls.save_wav("hit.wav", hit_sound)
+
+        # Generăm sunet de MISS (un buzz grav și scurt)
+        miss_sound = cls.generate_tone(150, 0.15, vol=0.4, type='saw', slide=-50)
+        cls.save_wav("miss.wav", miss_sound)
+
+# ==========================================
+# 2. MANAGER AUDIO (Pygame)
+# ==========================================
+class SoundManager:
+    def __init__(self, bgm_file):
+        self.enabled = False
+        self.music_playing = False
+        self.sounds = {}
+        self.bgm_file = bgm_file
+        
+        if PYGAME_AVAILABLE:
+            try:
+                # Inițializăm mixerul
+                pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
+                self.enabled = True
+                
+                # Verificăm dacă fișierele generate există. Dacă nu, le creăm acum!
+                if not os.path.exists("_sfx/hit.wav") or not os.path.exists("_sfx/miss.wav"):
+                    print("[SFX] Generez efectele audio 8-bit...")
+                    SFXGenerator.generate_all()
+                
+                # Încărcăm efectele în memorie
+                try:
+                    self.sounds['hit'] = pygame.mixer.Sound("_sfx/hit.wav")
+                    self.sounds['miss'] = pygame.mixer.Sound("_sfx/miss.wav")
+                    # Dăm volumul la efecte un pic mai încet să nu acopere piesa
+                    self.sounds['hit'].set_volume(0.5) 
+                    self.sounds['miss'].set_volume(0.6)
+                except Exception as e:
+                    print(f"[SFX] Eroare la încărcarea SFX-urilor: {e}")
+                    
+            except pygame.error as e:
+                print(f"[AVERTISMENT] Audio indisponibil (posibil limitare WSL/Linux). Jocul va fi silențios. Eroare: {e}")
+
+    def play_sfx(self, name):
+        if self.enabled and name in self.sounds:
+            try:
+                self.sounds[name].play()
+            except: pass
+
+    def play_bgm(self):
+        if self.enabled and not self.music_playing:
+            try:
+                if os.path.exists(self.bgm_file):
+                    pygame.mixer.music.load(self.bgm_file)
+                    pygame.mixer.music.set_volume(0.8)
+                    pygame.mixer.music.play()
+                    self.music_playing = True
+                    print(f"[AUDIO] Redau melodia: {self.bgm_file}")
+            except Exception as e:
+                print(f"[AUDIO] Eroare BGM: {e}")
+
+    def stop_bgm(self):
+        if self.enabled and self.music_playing:
+            pygame.mixer.music.stop()
+            self.music_playing = False
+
+
+# ==========================================
+# 3. ENGINE PIANO TILES
+# ==========================================
 class PianoTilesEngine:
     def __init__(self):
         self.running = True
         self.mode = None       
         self.start_time = 0
         self.is_pulsing = False
-        self.speed = 15 # Viteza de cădere (rânduri per secundă)
+        self.speed = 15 # Rânduri per secundă
 
         self.button_states = [False] * 64
         self.prev_button_states = [False] * 64
 
-        # --- Gestiune Audio ---
-        self.audio_enabled = False
-        self.music_playing = False
-        try:
-            pygame.mixer.init()
-            self.audio_enabled = True
-        except pygame.error as e:
-            print(f"\n[AVERTISMENT CRITIC] Nu s-a putut inițializa placa de sunet! Eroare: {e}")
-            print("-> Dacă ești în WSL (Linux), MUTĂ-TE pe Windows (CMD/PowerShell) pentru a avea sunet!\n")
+        # Inițializăm noul manager de sunet!
+        self.sound = SoundManager(AUDIO_FILE)
 
-        # --- Încărcare Nivel ---
         self.beatmap = []
         self.load_level(BEATMAP_FILE)
 
@@ -69,13 +185,9 @@ class PianoTilesEngine:
             if os.path.exists(filename):
                 with open(filename, 'r') as f:
                     data = json.load(f)
-                    # Filtrare "din 2 în 2" pentru a aerisi jocul
                     self.beatmap = data[::2] 
-                print(f"[OK] Am încărcat și filtrat {len(self.beatmap)} note din {filename}.")
-            else:
-                print(f"[!] Fișierul {filename} nu a fost găsit.")
-        except Exception as e:
-            print(f"[ERR] Eroare la citirea JSON: {e}")
+            else: pass
+        except Exception: pass
 
     def _reset_state(self):
         self.hit_tiles = {i: set() for i in range(4)}
@@ -84,20 +196,17 @@ class PianoTilesEngine:
         self.score_p1 = 0; self.misses_p1 = 0
         self.score_p2 = 0; self.misses_p2 = 0
         
-        # Oprim muzica dacă era deja pornită
-        if self.audio_enabled and self.music_playing:
-            pygame.mixer.music.stop()
-            self.music_playing = False
+        self.sound.stop_bgm()
 
     def get_score_report(self):
         if self.mode == '1':
-            return f"\n--- SCOR CO-OP ---\nHits: {self.score_p2}\nMisses: {self.misses_p2}\n------------------"
+            return f"--- SCOR CO-OP ---\nHits: {self.score_p2}\nMisses: {self.misses_p2}\n------------------"
         elif self.mode == '2':
-            return (f"\n--- SCOR 1v1 ---\n"
+            return (f"--- SCOR 1v1 ---\n"
                     f"P1 (SUS): {self.score_p1} Hits | {self.misses_p1} Misses\n"
                     f"P2 (JOS): {self.score_p2} Hits | {self.misses_p2} Misses\n"
                     f"-----------------")
-        return "Jocul este în așteptare."
+        return "[!] Jocul este în așteptare."
 
     def process_input(self):
         if self.mode is None or self.is_pulsing:
@@ -124,6 +233,7 @@ class PianoTilesEngine:
                         self.hit_tiles[col].add(tile_id)
                         self.flash_hits[(col, tile_id, 'down')] = current_t
                         self.score_p2 += 1 
+                        self.sound.play_sfx('hit') # SUNET DE HIT!
                         return 
                 elif self.mode == '2':
                     uid_d = f"d_{tile_id}"
@@ -131,12 +241,14 @@ class PianoTilesEngine:
                         self.hit_tiles[col].add(uid_d)
                         self.flash_hits[(col, tile_id, 'down')] = current_t
                         self.score_p2 += 1
+                        self.sound.play_sfx('hit') # SUNET DE HIT!
                         
                     uid_u = f"u_{tile_id}"
                     if uid_u not in self.hit_tiles[col]:
                         self.hit_tiles[col].add(uid_u)
                         self.flash_hits[(col, tile_id, 'up')] = current_t
                         self.score_p1 += 1
+                        self.sound.play_sfx('hit') # SUNET DE HIT!
                     return
 
     def _update_logic(self):
@@ -153,14 +265,20 @@ class PianoTilesEngine:
                 col = tile['column']
                 if self.mode == '1':
                     if tile_id not in self.hit_tiles[col] and tile_id not in self.miss_tiles[col]:
-                        self.miss_tiles[col].add(tile_id); self.misses_p2 += 1
+                        self.miss_tiles[col].add(tile_id)
+                        self.misses_p2 += 1
+                        self.sound.play_sfx('miss') # SUNET DE MISS!
                 elif self.mode == '2':
                     uid_d = f"d_{tile_id}"
                     if uid_d not in self.hit_tiles[col] and uid_d not in self.miss_tiles[col]:
-                        self.miss_tiles[col].add(uid_d); self.misses_p2 += 1
+                        self.miss_tiles[col].add(uid_d)
+                        self.misses_p2 += 1
+                        self.sound.play_sfx('miss') # SUNET DE MISS!
                     uid_u = f"u_{tile_id}"
                     if uid_u not in self.hit_tiles[col] and uid_u not in self.miss_tiles[col]:
-                        self.miss_tiles[col].add(uid_u); self.misses_p1 += 1
+                        self.miss_tiles[col].add(uid_u)
+                        self.misses_p1 += 1
+                        self.sound.play_sfx('miss') # SUNET DE MISS!
 
     def render(self):
         buffer = bytearray(FRAME_DATA_LENGTH)
@@ -171,19 +289,7 @@ class PianoTilesEngine:
             if t - self.start_time > 2.0: 
                 self.is_pulsing = False
                 self.start_time = time.time() 
-                
-                # --- START MUZICĂ ---
-                if self.audio_enabled and not self.music_playing:
-                    try:
-                        if os.path.exists(AUDIO_FILE):
-                            pygame.mixer.music.load(AUDIO_FILE)
-                            pygame.mixer.music.play()
-                            self.music_playing = True
-                            print("[PLAY] Muzica a pornit!")
-                        else:
-                            print(f"[ERR] Nu găsesc fișierul audio: {AUDIO_FILE}")
-                    except Exception as e:
-                        print(f"[ERR] Eroare la redarea audio: {e}")
+                self.sound.play_bgm() # START MUZICĂ FUNDAL
 
         for y in range(HEIGHT):
             for x in range(WIDTH):
@@ -262,6 +368,10 @@ class PianoTilesEngine:
         if off + 16 < len(buffer):
             buffer[off], buffer[off+8], buffer[off+16] = color[1], color[0], color[2]
 
+
+# ==========================================
+# 4. NETWORK MANAGER
+# ==========================================
 class NetworkManager:
     def __init__(self, game):
         self.game = game
@@ -291,29 +401,57 @@ class NetworkManager:
             self.sock.sendto(bytearray([0x75, 0,0,0, 8, 2, 0,0, 0x55, 0x66, seq>>8, seq&0xFF, 0,0,0, 0x0E, 0]), (UDP_IP, UDP_PORT_SEND))
             time.sleep(0.04)
 
+# ==========================================
+# 5. CLI MENU
+# ==========================================
+def clear_screen():
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+def print_menu(message=""):
+    clear_screen()
+    print("=== PIANO TILES (FULL SYNC + AUDIO) ===")
+    print("Comenzi disponibile:")
+    print("  1     - Pornește Mod Co-op (2x2)")
+    print("  2     - Pornește Mod 1v1 (1x1)")
+    print("  0     - Resetare / Oprire Joc")
+    print("  score - Afișează scorul curent")
+    print("  q     - Ieșire")
+    print("=======================================")
+    
+    if message:
+        print(f"\n{message}")
+
 if __name__ == "__main__":
     game = PianoTilesEngine()
     net = NetworkManager(game)
     threading.Thread(target=net.run, daemon=True).start()
     
-    print("=== PIANO TILES (FULL SYNC) ===")
-    print("Comenzi: 1 (Co-op), 2 (1v1), 0 (Reset), score (Afișează scor), q (Ieșire)")
+    print_menu(f"[OK] Sistem pregătit. Tile-uri reținute: {len(game.beatmap)}")
     
     try:
         while game.running:
-            cmd = input("> ").strip().lower()
-            if cmd == 'q': game.running = False
-            elif cmd == 'score': print(game.get_score_report())
+            cmd = input("\n> ").strip().lower()
+            
+            if cmd == 'q': 
+                game.running = False
+            elif cmd == 'score': 
+                print_menu(game.get_score_report())
             elif cmd in ['1', '2']:
                 game.mode = cmd
                 game.is_pulsing = True
                 game._reset_state()
                 game.start_time = time.time()
+                mode_name = "Co-op" if cmd == '1' else "1v1"
+                print_menu(f"[*] Modul {mode_name} a fost pornit! Pregătește-te...")
             elif cmd == '0':
                 game.mode = None
                 game._reset_state()
+                print_menu("[*] Jocul a fost resetat și este în așteptare.")
+            else:
+                print_menu("[!] Comandă necunoscută. Folosește comenzile din listă.")
+                
     except KeyboardInterrupt: 
         game.running = False
     finally:
-        if game.audio_enabled:
+        if game.sound.enabled:
             pygame.mixer.quit()
