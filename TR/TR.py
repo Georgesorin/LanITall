@@ -170,8 +170,6 @@ class TRGame:
         self.STARTUP_DURATION = 5.0 
         
         self.RESUME_TILES = [(0, 18), (0, 19)]
-
-        
         
         self.COLOR_ACTIVE_PURPLE = (128, 0, 128)
         self.COLOR_ACTIVE_YELLOW = (128, 128, 0)  
@@ -260,7 +258,7 @@ class TRGame:
             self.sound.stop_bgm() 
             self.sound.play('win') 
         else:
-            pass # Console prints are replaced by GUI
+            pass
 
     def get_safe_text_coordinates(self, killer_y):
         void_top = killer_y - 3
@@ -293,12 +291,23 @@ class TRGame:
 
             if self.state == "WINNER":
                 self.render_rainbow(buffer, now)
+                
                 for vx, vy in self.void_zone: self.set_led(buffer, vx, vy, self.COLOR_DEAD)
                 for dx, dy in self.death_pattern_zone: self.set_led(buffer, dx, dy, self.COLOR_LOSS)
+                
                 tx, ty = self.win_text_coords
+                
+                # 1. Draw a Solid Black Rectangle (Banner) behind the text
+                # The text spans height 5 and width 14. We pad it by 1 tile on all sides.
+                for fill_y in range(ty - 1, ty + 6):
+                    for fill_x in range(tx - 1, tx + 16):
+                        self.set_led(buffer, fill_x, fill_y, self.COLOR_DEAD)
+                
+                # 2. Draw Bright White Text over the black banner
                 self.draw_glyph(buffer, 'W', tx, ty, self.COLOR_WHITE)
                 self.draw_glyph(buffer, 'I', tx+6, ty, self.COLOR_WHITE) 
                 self.draw_glyph(buffer, 'N', tx+10, ty, self.COLOR_WHITE)
+                
                 return buffer
 
             is_frozen = (self.state != "PLAYING")
@@ -581,38 +590,80 @@ class TNTGUI:
         self.game = game
         self.net = net
         self.root.title("TNT Run Control Panel")
-        self.root.geometry("350x250")
+        self.root.geometry("420x460") # Made the window slightly taller and wider
         self.root.resizable(False, False)
 
-        # Style configurations
-        style = ttk.Style()
-        style.configure("TButton", font=("Arial", 11))
-        style.configure("TLabel", font=("Arial", 11))
+        # --- Color Palette ---
+        self.bg_color = "#1E1E2E" # Sleek dark background
+        self.root.configure(bg=self.bg_color)
 
-        # Status Display
+        # Status Display (Looks like an arcade screen)
         self.status_var = tk.StringVar()
-        self.status_label = tk.Label(root, textvariable=self.status_var, font=("Arial", 16, "bold"), fg="#333")
-        self.status_label.pack(pady=15)
+        self.status_label = tk.Label(
+            root, textvariable=self.status_var, 
+            font=("Consolas", 15, "bold"), 
+            bg="#313244", fg="#A6E3A1", # Dark grey panel with bright green text
+            width=30, height=3, relief="sunken", bd=4
+        )
+        self.status_label.pack(pady=20)
 
-        # Control Frame (Players & Start)
-        control_frame = tk.Frame(root)
+        # Title for the buttons
+        tk.Label(
+            root, text="Select Players to Start:", 
+            font=("Arial", 12, "bold"), 
+            bg=self.bg_color, fg="#CDD6F4"
+        ).pack(pady=5)
+
+        # Control Frame (3x3 Grid for Players)
+        control_frame = tk.Frame(root, bg=self.bg_color)
         control_frame.pack(pady=5)
 
-        ttk.Label(control_frame, text="Players:").grid(row=0, column=0, padx=5)
-        
-        self.player_spinbox = ttk.Spinbox(control_frame, from_=1, to=30, width=5, font=("Arial", 11))
-        self.player_spinbox.set(2)
-        self.player_spinbox.grid(row=0, column=1, padx=5)
+        # A vibrant list of hex colors for the 9 buttons
+        btn_colors = [
+            "#89B4FA", "#74C7EC", "#89DCEB", 
+            "#F9E2AF", "#FAB387", "#F38BA8", 
+            "#EBA0AC", "#F5C2E7", "#CBA6F7"
+        ]
 
-        self.start_btn = ttk.Button(control_frame, text="Start Game", command=self.start_game)
-        self.start_btn.grid(row=0, column=2, padx=5)
+        # Generate buttons 2 through 10
+        for i in range(2, 11):
+            idx = i - 2
+            row = idx // 3
+            col = idx % 3
+            
+            btn = tk.Button(
+                control_frame, text=f"{i} Players", 
+                font=("Arial", 11, "bold"),
+                bg=btn_colors[idx], fg="#11111B", # Colored background, dark text
+                activebackground="#FFFFFF", # Flashes white when clicked
+                width=10, height=2, bd=3,
+                command=lambda num=i: self.start_game(num) # Passes the exact number
+            )
+            btn.grid(row=row, column=col, padx=5, pady=5)
 
-        # Additional Controls
-        self.restart_btn = ttk.Button(root, text="Restart Round", command=self.restart_round)
-        self.restart_btn.pack(pady=5)
+        # Additional Controls Frame (Bottom Row)
+        action_frame = tk.Frame(root, bg=self.bg_color)
+        action_frame.pack(pady=15)
 
-        self.quit_btn = ttk.Button(root, text="Quit Application", command=self.quit_app)
-        self.quit_btn.pack(pady=5)
+        # Restart Button (Yellow/Orange)
+        self.restart_btn = tk.Button(
+            action_frame, text="↻ Restart", 
+            font=("Arial", 11, "bold"), 
+            bg="#F9E2AF", fg="#11111B",
+            width=12, height=2, bd=3,
+            command=self.restart_round
+        )
+        self.restart_btn.grid(row=0, column=0, padx=10)
+
+        # Quit Button (Red)
+        self.quit_btn = tk.Button(
+            action_frame, text="✖ Quit", 
+            font=("Arial", 11, "bold"), 
+            bg="#F38BA8", fg="#11111B",
+            width=12, height=2, bd=3,
+            command=self.quit_app
+        )
+        self.quit_btn.grid(row=0, column=1, padx=10)
 
         # Handle window close button (X)
         self.root.protocol("WM_DELETE_WINDOW", self.quit_app)
@@ -620,12 +671,9 @@ class TNTGUI:
         # Start background loop to update the UI
         self.update_loop()
 
-    def start_game(self):
-        try:
-            num = int(self.player_spinbox.get())
-            self.game.start_game(num)
-        except ValueError:
-            pass
+    def start_game(self, num_players):
+        # Directly starts the game with the number passed from the button
+        self.game.start_game(num_players)
 
     def restart_round(self):
         self.game.restart_round()
@@ -642,14 +690,19 @@ class TNTGUI:
         
         if state == "LOBBY":
             display_text = "LOBBY\nReady to start!"
+            self.status_label.config(fg="#89B4FA") # Blue text
         elif state == "STARTUP":
             display_text = "STARTING...\nGet ready!"
+            self.status_label.config(fg="#F9E2AF") # Yellow text
         elif state == "PLAYING":
             display_text = f"PLAYING\nPlayers Left: {players}"
+            self.status_label.config(fg="#A6E3A1") # Green text
         elif state in ["PAUSED", "COUNTDOWN"]:
             display_text = f"PAUSED (Elimination!)\nPlayers Left: {players}"
+            self.status_label.config(fg="#FAB387") # Orange text
         elif state == "WINNER":
             display_text = "WE HAVE A WINNER!"
+            self.status_label.config(fg="#F38BA8") # Red text
         else:
             display_text = state
 
