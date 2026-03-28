@@ -23,7 +23,7 @@ FRAME_DATA_LENGTH = 8 * 64 * 3
 
 # --- Configurație Fișiere ---
 BEATMAP_FILE = "level.json"
-AUDIO_FILE = "Rockefeller Street, Nightcore Version (8-bitRockDrum & Bass) Remix.wav"
+AUDIO_FILE = "Nightcore - Rockefeller Street (Lyrics).mp3"
 
 # Culori
 PURPLE  = (154, 66, 255)
