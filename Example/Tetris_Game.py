@@ -23,8 +23,8 @@ _CFG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tetris_con
 def _load_config():
     defaults = {
         "device_ip": "255.255.255.255",
-        "send_port": 4626,
-        "recv_port": 7800,
+        "send_port": 1067,
+        "recv_port": 1069,
         "bind_ip": "0.0.0.0"
     }
     try:

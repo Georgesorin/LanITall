@@ -6,8 +6,10 @@ import random
 import copy
 import psutil
 import os
-
 import json
+import math
+import tkinter as tk
+from tkinter import ttk
 
 try:
     import pygame
@@ -44,7 +46,7 @@ NUM_CHANNELS = 8
 LEDS_PER_CHANNEL = 64
 FRAME_DATA_LENGTH = NUM_CHANNELS * LEDS_PER_CHANNEL * 3
 
-# --- Password for Checksum (Optional, code now uses forced checksums in NetworkManager) ---
+# --- Password for Checksum ---
 PASSWORD_ARRAY = [
     35, 63, 187, 69, 107, 178, 92, 76, 39, 69, 205, 37, 223, 255, 165, 231, 16, 220, 99, 61, 25, 203, 203, 
     155, 107, 30, 92, 144, 218, 194, 226, 88, 196, 190, 67, 195, 159, 185, 209, 24, 163, 65, 25, 172, 126, 
@@ -60,22 +62,17 @@ PASSWORD_ARRAY = [
     182, 84, 189, 29, 35, 143, 138, 171
 ]
 
-# --- Font Data (3x5 or similar) ---
+# --- Font Data ---
 FONT = {
-    1: [(1,0), (1,1), (1,2), (1,3), (1,4)], # Center vertical
+    1: [(1,0), (1,1), (1,2), (1,3), (1,4)], 
     2: [(0,0), (1,0), (2,0), (2,1), (1,2), (0,2), (0,3), (0,4), (1,4), (2,4)],
     3: [(0,0), (1,0), (2,0), (2,1), (1,2), (2,2), (2,3), (0,4), (1,4), (2,4)],
     4: [(0,0), (0,1), (0,2), (1,2), (2,2), (2,0), (2,1), (2,3), (2,4)],
     5: [(0,0), (1,0), (2,0), (0,1), (0,2), (1,2), (2,2), (2,3), (0,4), (1,4), (2,4)],
-    'W': [(0,0),(0,1),(0,2),(0,3),(0,4), (4,0),(4,1),(4,2),(4,3),(4,4), (1,3),(2,2),(3,3)], # Wide W
+    'W': [(0,0),(0,1),(0,2),(0,3),(0,4), (4,0),(4,1),(4,2),(4,3),(4,4), (1,3),(2,2),(3,3)], 
     'I': [(0,0),(1,0),(2,0), (1,1),(1,2),(1,3), (0,4),(1,4),(2,4)],
-    'N': [(0,0),(0,1),(0,2),(0,3),(0,4), (3,0),(3,1),(3,2),(3,3),(3,4), (1,1),(2,2)] # Compact N
+    'N': [(0,0),(0,1),(0,2),(0,3),(0,4), (3,0),(3,1),(3,2),(3,3),(3,4), (1,1),(2,2)] 
 }
-
-# Input Configuration
-INPUT_REPEAT_RATE = 0.25  # Seconds per move when holding
-INPUT_INITIAL_DELAY = 0.5 # Initial delay before repeat starts
-
 
 def calculate_checksum(data):
     acc = sum(data)
@@ -83,21 +80,6 @@ def calculate_checksum(data):
     return PASSWORD_ARRAY[idx] if idx < len(PASSWORD_ARRAY) else 0
 
 # --- Classes ---
-
-import time
-import threading
-import math
-import random
-import os
-
-import os
-
-try:
-    import pygame
-    PYGAME_AVAILABLE = True
-except ImportError:
-    PYGAME_AVAILABLE = False
-
 import SoundGenerator
 
 class SoundManager:
@@ -105,7 +87,6 @@ class SoundManager:
         self.enabled = False
         try:
             if PYGAME_AVAILABLE:
-                # Same initialization parameters as your Tetris game
                 pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
                 self.enabled = True
                 self.sounds = {}
@@ -117,7 +98,6 @@ class SoundManager:
             self.enabled = False
 
     def _load_sounds(self):
-        # --- NEW: Auto-generate if missing ---
         if not os.path.exists("_sfx/step.wav"):
             print("Generating TNT SFX...")
             SoundGenerator.generate_all()
@@ -139,7 +119,6 @@ class SoundManager:
             else:
                 print(f"Warning: Missing SFX {path}")
         
-        # Load Background Music if it exists
         if os.path.exists("_sfx/bgm.wav"):
             try:
                 pygame.mixer.music.load("_sfx/bgm.wav")
@@ -157,7 +136,7 @@ class SoundManager:
         if not self.enabled: return
         try:
             if not pygame.mixer.music.get_busy():
-                pygame.mixer.music.play(-1) # Loop indefinitely
+                pygame.mixer.music.play(-1) 
         except: pass
     
     def stop_bgm(self):
@@ -165,20 +144,13 @@ class SoundManager:
         try: pygame.mixer.music.stop()
         except: pass
 
-import time
-import threading
-import math
-import random
-
 class TRGame:
     def __init__(self):
         self.running = True
         self.lock = threading.RLock()
         
-        # --- Audio Setup ---
         self.sound = SoundManager() 
         
-        # --- Game States ---
         self.state = "LOBBY" 
         self.players_remaining = 0
         self.pause_time_start = 0
@@ -186,12 +158,10 @@ class TRGame:
         self.last_played_tick = 0 
         self.killer_tile = None 
         
-        # --- Pattern Zones ---
         self.death_pattern_zone = [] 
         self.void_zone = []          
         self.win_text_coords = (1, 13) 
 
-        # --- Constants ---
         self.BOARD_WIDTH = 16
         self.BOARD_HEIGHT = 32
         self.PULSE_DURATION = 2.0  
@@ -200,17 +170,17 @@ class TRGame:
         self.STARTUP_DURATION = 5.0 
         
         self.RESUME_TILES = [(0, 18), (0, 19)]
+
         
-        # Colors (R, G, B)
+        
         self.COLOR_ACTIVE_PURPLE = (128, 0, 128)
-        self.COLOR_ACTIVE_YELLOW = (128, 128, 0)  # Thermal/Amber for pauses
-        self.COLOR_LUMINOUS_YELLOW = (255, 255, 0) # Super bright for the very beginning
+        self.COLOR_ACTIVE_YELLOW = (128, 128, 0)  
+        self.COLOR_LUMINOUS_YELLOW = (255, 255, 0) 
         self.COLOR_DEAD   = (0, 0, 0)
         self.COLOR_LOSS   = (255, 0, 0) 
         self.COLOR_RESUME = (0, 255, 0) 
         self.COLOR_WHITE  = (255, 255, 255)
         
-        # --- Grid Management ---
         self.tile_states = [[{'status': 'ACTIVE', 'start_time': 0} for _ in range(self.BOARD_WIDTH)] for _ in range(self.BOARD_HEIGHT)]
         self.button_states = [False] * 512
         self.prev_button_states = [False] * 512
@@ -289,9 +259,8 @@ class TRGame:
             self.state = "WINNER"
             self.sound.stop_bgm() 
             self.sound.play('win') 
-            print("WE HAVE A WINNER!")
         else:
-            print(f"Elimination! Players left: {self.players_remaining}")
+            pass # Console prints are replaced by GUI
 
     def get_safe_text_coordinates(self, killer_y):
         void_top = killer_y - 3
@@ -316,12 +285,9 @@ class TRGame:
             if self.state == "LOBBY": return buffer
 
             if self.state == "STARTUP":
-                # Super bright yellow background
                 self.fill_buffer(buffer, self.COLOR_LUMINOUS_YELLOW)
                 num = int(self.STARTUP_DURATION - (now - self.countdown_start)) + 1
                 if num > 0: 
-                    # Scale factor of 3 makes the 3x5 font into 9x15.
-                    # Centered beautifully on a 16x32 board: X=3, Y=8
                     self.draw_scaled_glyph(buffer, num, 3, 8, self.COLOR_WHITE, scale=3)
                 return buffer
 
@@ -353,8 +319,6 @@ class TRGame:
                         if self.state == "COUNTDOWN": color = tuple(min(255, int(c * hb)) for c in color)
                     self.set_led(buffer, x, y, color)
         return buffer
-
-    # --- Standard Helpers ---
 
     def resume_game(self):
         with self.lock:
@@ -419,7 +383,6 @@ class TRGame:
             for dx, dy in FONT[key]: self.set_led(buffer, ox + dx, oy + dy, color)
 
     def draw_scaled_glyph(self, buffer, key, ox, oy, color, scale):
-        """Draws a font glyph dynamically scaled up by drawing NxN blocks per pixel."""
         if key in FONT:
             for dx, dy in FONT[key]:
                 for sx in range(scale):
@@ -454,10 +417,8 @@ class NetworkManager:
         self.sequence_number = 0
         self.prev_button_states = [False] * 64
         
-        # Auto-Bind Logic: If no bind_ip specified, we stay on 0.0.0.0 (default)
         bind_ip = CONFIG.get("bind_ip", "0.0.0.0")
         
-        # We try to bind if a specific IP was requested, but fallback gracefully
         if bind_ip != "0.0.0.0":
             try: 
                 self.sock_send.bind((bind_ip, 0))
@@ -478,7 +439,6 @@ class NetworkManager:
             time.sleep(0.05) 
 
     def send_packet(self, frame_data):
-        # Protocol v11 Implementation
         self.sequence_number = (self.sequence_number + 1) & 0xFFFF
         if self.sequence_number == 0: self.sequence_number = 1
         
@@ -495,7 +455,7 @@ class NetworkManager:
             self.sequence_number & 0xFF,
             0x00, 0x00, 0x00 
         ])
-        start_packet.append(0x0E) # Force Checksum
+        start_packet.append(0x0E) 
         start_packet.append(0x00) 
         try: 
             self.sock_send.sendto(start_packet, (target_ip, port))
@@ -506,7 +466,6 @@ class NetworkManager:
         rand1 = random.randint(0, 127)
         rand2 = random.randint(0, 127)
         
-        # Payload size fixed for 8 channels * 64 LEDs
         fff0_payload = bytearray()
         for _ in range(NUM_CHANNELS):
             fff0_payload += bytes([(LEDS_PER_CHANNEL >> 8) & 0xFF, LEDS_PER_CHANNEL & 0xFF])
@@ -524,7 +483,7 @@ class NetworkManager:
             0x75, rand1, rand2, 
             (fff0_len >> 8) & 0xFF, (fff0_len & 0xFF)
         ]) + fff0_internal
-        fff0_packet.append(0x1E) # Force Checksum
+        fff0_packet.append(0x1E) 
         fff0_packet.append(0x00) 
         
         try: 
@@ -570,7 +529,7 @@ class NetworkManager:
             except: pass
             
             data_packet_index += 1
-            time.sleep(0.005) # Slight delay
+            time.sleep(0.005) 
 
         # --- 4. End Packet ---
         rand1 = random.randint(0, 127)
@@ -593,13 +552,10 @@ class NetworkManager:
         while self.running:
             try:
                 data, _ = self.sock_recv.recvfrom(2048)
-                # Ensure it's a valid data packet from the floor
                 if len(data) >= 1373 and data[0] == 0x88:
-                    # Each channel has 171 bytes of data. 
-                    # We iterate through all 8 channels (0 to 7)
                     for ch in range(8):
                         offset = 2 + (ch * 171) + 1 
-                        ch_data = data[offset : offset + 64] # Get the 64 sensors for this channel
+                        ch_data = data[offset : offset + 64] 
                         
                         for led_idx, val in enumerate(ch_data):
                             global_idx = (ch * 64) + led_idx
@@ -616,6 +572,93 @@ class NetworkManager:
         t1.start()
         t2.start()
 
+
+# --- GUI Manager ---
+
+class TNTGUI:
+    def __init__(self, root, game, net):
+        self.root = root
+        self.game = game
+        self.net = net
+        self.root.title("TNT Run Control Panel")
+        self.root.geometry("350x250")
+        self.root.resizable(False, False)
+
+        # Style configurations
+        style = ttk.Style()
+        style.configure("TButton", font=("Arial", 11))
+        style.configure("TLabel", font=("Arial", 11))
+
+        # Status Display
+        self.status_var = tk.StringVar()
+        self.status_label = tk.Label(root, textvariable=self.status_var, font=("Arial", 16, "bold"), fg="#333")
+        self.status_label.pack(pady=15)
+
+        # Control Frame (Players & Start)
+        control_frame = tk.Frame(root)
+        control_frame.pack(pady=5)
+
+        ttk.Label(control_frame, text="Players:").grid(row=0, column=0, padx=5)
+        
+        self.player_spinbox = ttk.Spinbox(control_frame, from_=1, to=30, width=5, font=("Arial", 11))
+        self.player_spinbox.set(2)
+        self.player_spinbox.grid(row=0, column=1, padx=5)
+
+        self.start_btn = ttk.Button(control_frame, text="Start Game", command=self.start_game)
+        self.start_btn.grid(row=0, column=2, padx=5)
+
+        # Additional Controls
+        self.restart_btn = ttk.Button(root, text="Restart Round", command=self.restart_round)
+        self.restart_btn.pack(pady=5)
+
+        self.quit_btn = ttk.Button(root, text="Quit Application", command=self.quit_app)
+        self.quit_btn.pack(pady=5)
+
+        # Handle window close button (X)
+        self.root.protocol("WM_DELETE_WINDOW", self.quit_app)
+
+        # Start background loop to update the UI
+        self.update_loop()
+
+    def start_game(self):
+        try:
+            num = int(self.player_spinbox.get())
+            self.game.start_game(num)
+        except ValueError:
+            pass
+
+    def restart_round(self):
+        self.game.restart_round()
+
+    def quit_app(self):
+        self.game.running = False
+        self.net.running = False
+        self.root.destroy()
+
+    def update_loop(self):
+        # Update the UI texts based on game state
+        state = self.game.state
+        players = self.game.players_remaining
+        
+        if state == "LOBBY":
+            display_text = "LOBBY\nReady to start!"
+        elif state == "STARTUP":
+            display_text = "STARTING...\nGet ready!"
+        elif state == "PLAYING":
+            display_text = f"PLAYING\nPlayers Left: {players}"
+        elif state in ["PAUSED", "COUNTDOWN"]:
+            display_text = f"PAUSED (Elimination!)\nPlayers Left: {players}"
+        elif state == "WINNER":
+            display_text = "WE HAVE A WINNER!"
+        else:
+            display_text = state
+
+        self.status_var.set(display_text)
+        
+        # Schedule the next update in 100 milliseconds
+        self.root.after(100, self.update_loop)
+
+
 def game_thread_func(game):
     while game.running:
         game.tick()
@@ -630,29 +673,13 @@ if __name__ == "__main__":
     gt.daemon = True
     gt.start()
     
-    print("Tetris Console Server Running.")
-    print("Commands: 'start <num_players>', 'restart', 'quit'")
+    # Initialize Tkinter GUI
+    root = tk.Tk()
+    gui = TNTGUI(root, game, net)
     
-    try:
-        while game.running:
-            cmd = input("> ").strip().lower()
-            if cmd == 'quit' or cmd == 'exit':
-                game.running = False
-                break
-            elif cmd.startswith('start'):
-                try:
-                    num = int(cmd.split()[1])
-                    game.start_game(num)
-                    print(f"Started game with {num} players.")
-                except:
-                    print("Usage: start <num_players>")
-            elif cmd == 'restart':
-                game.restart_round()
-                print("Restarted round.")
-            else:
-                 print("Unknown command.")
-    except KeyboardInterrupt:
-        game.running = False
-
-    net.running = False
+    print("TNT Run GUI Server Running...")
+    
+    # Start the GUI event loop
+    root.mainloop()
+    
     print("Exiting...")
