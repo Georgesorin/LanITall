@@ -23,8 +23,8 @@ _CFG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tetris_con
 def _load_config():
     defaults = {
         "device_ip": "255.255.255.255",
-        "send_port": 1067,
-        "recv_port": 1069,
+        "send_port": 4626,
+        "recv_port": 7800,
         "bind_ip": "0.0.0.0"
     }
     try:
@@ -158,6 +158,10 @@ class TRGame:
         self.last_played_tick = 0 
         self.killer_tile = None 
         
+        # --- Timer Logic Added Here ---
+        self.total_play_time = 0.0
+        self.last_tick_time = time.time()
+        
         self.death_pattern_zone = [] 
         self.void_zone = []          
         self.win_text_coords = (1, 13) 
@@ -185,7 +189,14 @@ class TRGame:
 
     def tick(self):
         now = time.time()
+        delta = now - self.last_tick_time
+        self.last_tick_time = now
+
         with self.lock:
+            # Advance the timer only during active play
+            if self.state == "PLAYING":
+                self.total_play_time += delta
+
             if self.state == "LOBBY" or self.state == "WINNER": return
 
             if self.state == "STARTUP" or self.state == "COUNTDOWN":
@@ -257,8 +268,6 @@ class TRGame:
             self.state = "WINNER"
             self.sound.stop_bgm() 
             self.sound.play('win') 
-        else:
-            pass
 
     def get_safe_text_coordinates(self, killer_y):
         void_top = killer_y - 3
@@ -291,19 +300,17 @@ class TRGame:
 
             if self.state == "WINNER":
                 self.render_rainbow(buffer, now)
-                
                 for vx, vy in self.void_zone: self.set_led(buffer, vx, vy, self.COLOR_DEAD)
                 for dx, dy in self.death_pattern_zone: self.set_led(buffer, dx, dy, self.COLOR_LOSS)
                 
                 tx, ty = self.win_text_coords
                 
-                # 1. Draw a Solid Black Rectangle (Banner) behind the text
-                # The text spans height 5 and width 14. We pad it by 1 tile on all sides.
+                # 1. Draw Solid Black Banner
                 for fill_y in range(ty - 1, ty + 6):
                     for fill_x in range(tx - 1, tx + 16):
                         self.set_led(buffer, fill_x, fill_y, self.COLOR_DEAD)
                 
-                # 2. Draw Bright White Text over the black banner
+                # 2. Draw Bright White Text
                 self.draw_glyph(buffer, 'W', tx, ty, self.COLOR_WHITE)
                 self.draw_glyph(buffer, 'I', tx+6, ty, self.COLOR_WHITE) 
                 self.draw_glyph(buffer, 'N', tx+10, ty, self.COLOR_WHITE)
@@ -406,6 +413,11 @@ class TRGame:
         with self.lock:
             self.players_remaining = num_players
             self.state = "STARTUP"
+            
+            # Reset timer variables for new game
+            self.total_play_time = 0.0
+            self.last_tick_time = time.time()
+            
             self.countdown_start = time.time()
             self.last_played_tick = 0
             self.killer_tile = None
@@ -414,7 +426,8 @@ class TRGame:
             
             self.sound.start_bgm()
 
-    def restart_round(self): self.start_game(self.players_remaining if self.players_remaining > 0 else 2)
+    def restart_round(self): 
+        self.start_game(self.players_remaining if self.players_remaining > 0 else 2)
 
 class NetworkManager:
     def __init__(self, game):
@@ -427,18 +440,15 @@ class NetworkManager:
         self.prev_button_states = [False] * 64
         
         bind_ip = CONFIG.get("bind_ip", "0.0.0.0")
-        
         if bind_ip != "0.0.0.0":
-            try: 
-                self.sock_send.bind((bind_ip, 0))
-            except Exception as e: 
-                print(f"Warning: Could not bind send socket to {bind_ip} (Routing via default): {e}")
+            try: self.sock_send.bind((bind_ip, 0))
+            except Exception as e: print(f"Warning: Could not bind send socket: {e}")
         
         try:
             self.sock_recv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.sock_recv.bind(("0.0.0.0", UDP_LISTEN_PORT))
         except Exception as e:
-            print(f"Critical Error: Could not bind receive socket to port {UDP_LISTEN_PORT}: {e}")
+            print(f"Critical Error: Could not bind receive socket: {e}")
             self.running = False
 
     def send_loop(self):
@@ -455,46 +465,19 @@ class NetworkManager:
         port = UDP_SEND_PORT
         
         # --- 1. Start Packet ---
-        rand1 = random.randint(0, 127)
-        rand2 = random.randint(0, 127)
-        start_packet = bytearray([
-            0x75, rand1, rand2, 0x00, 0x08, 
-            0x02, 0x00, 0x00, 0x33, 0x44,   
-            (self.sequence_number >> 8) & 0xFF,
-            self.sequence_number & 0xFF,
-            0x00, 0x00, 0x00 
-        ])
-        start_packet.append(0x0E) 
-        start_packet.append(0x00) 
+        rand1, rand2 = random.randint(0, 127), random.randint(0, 127)
+        start_packet = bytearray([0x75, rand1, rand2, 0x00, 0x08, 0x02, 0x00, 0x00, 0x33, 0x44, (self.sequence_number >> 8) & 0xFF, self.sequence_number & 0xFF, 0x00, 0x00, 0x00, 0x0E, 0x00])
         try: 
             self.sock_send.sendto(start_packet, (target_ip, port))
             self.sock_send.sendto(start_packet, ("127.0.0.1", port))
         except: pass
 
         # --- 2. FFF0 Packet ---
-        rand1 = random.randint(0, 127)
-        rand2 = random.randint(0, 127)
-        
         fff0_payload = bytearray()
-        for _ in range(NUM_CHANNELS):
-            fff0_payload += bytes([(LEDS_PER_CHANNEL >> 8) & 0xFF, LEDS_PER_CHANNEL & 0xFF])
-
-        fff0_internal = bytearray([
-            0x02, 0x00, 0x00, 
-            0x88, 0x77, 
-            0xFF, 0xF0, 
-            (len(fff0_payload) >> 8) & 0xFF, (len(fff0_payload) & 0xFF)
-        ]) + fff0_payload
-        
+        for _ in range(NUM_CHANNELS): fff0_payload += bytes([(LEDS_PER_CHANNEL >> 8) & 0xFF, LEDS_PER_CHANNEL & 0xFF])
+        fff0_internal = bytearray([0x02, 0x00, 0x00, 0x88, 0x77, 0xFF, 0xF0, (len(fff0_payload) >> 8) & 0xFF, (len(fff0_payload) & 0xFF)]) + fff0_payload
         fff0_len = len(fff0_internal) - 1
-        
-        fff0_packet = bytearray([
-            0x75, rand1, rand2, 
-            (fff0_len >> 8) & 0xFF, (fff0_len & 0xFF)
-        ]) + fff0_internal
-        fff0_packet.append(0x1E) 
-        fff0_packet.append(0x00) 
-        
+        fff0_packet = bytearray([0x75, random.randint(0, 127), random.randint(0, 127), (fff0_len >> 8) & 0xFF, (fff0_len & 0xFF)]) + fff0_internal + bytearray([0x1E, 0x00])
         try: 
             self.sock_send.sendto(fff0_packet, (target_ip, port))
             self.sock_send.sendto(fff0_packet, ("127.0.0.1", port))
@@ -503,55 +486,22 @@ class NetworkManager:
         # --- 3. Data Packets ---
         chunk_size = 984 
         data_packet_index = 1
-        
         for i in range(0, len(frame_data), chunk_size):
-            rand1 = random.randint(0, 127)
-            rand2 = random.randint(0, 127)
-
             chunk = frame_data[i:i+chunk_size]
-            
-            internal_data = bytearray([
-                0x02, 0x00, 0x00, 
-                (0x8877 >> 8) & 0xFF, (0x8877 & 0xFF), 
-                (data_packet_index >> 8) & 0xFF, (data_packet_index & 0xFF), 
-                (len(chunk) >> 8) & 0xFF, (len(chunk) & 0xFF) 
-            ])
-            internal_data += chunk
-            
+            internal_data = bytearray([0x02, 0x00, 0x00, (0x8877 >> 8) & 0xFF, (0x8877 & 0xFF), (data_packet_index >> 8) & 0xFF, (data_packet_index & 0xFF), (len(chunk) >> 8) & 0xFF, (len(chunk) & 0xFF)]) + chunk
             payload_len = len(internal_data) - 1 
-            
-            packet = bytearray([
-                0x75, rand1, rand2,
-                (payload_len >> 8) & 0xFF, (payload_len & 0xFF)
-            ]) + internal_data
-            
-            if len(chunk) == 984:
-                packet.append(0x1E) 
-            else:
-                packet.append(0x36) 
-                
+            packet = bytearray([0x75, random.randint(0, 127), random.randint(0, 127), (payload_len >> 8) & 0xFF, (payload_len & 0xFF)]) + internal_data
+            packet.append(0x1E if len(chunk) == 984 else 0x36)
             packet.append(0x00)
-            
             try: 
                 self.sock_send.sendto(packet, (target_ip, port))
                 self.sock_send.sendto(packet, ("127.0.0.1", port))
             except: pass
-            
             data_packet_index += 1
             time.sleep(0.005) 
 
         # --- 4. End Packet ---
-        rand1 = random.randint(0, 127)
-        rand2 = random.randint(0, 127)
-        end_packet = bytearray([
-            0x75, rand1, rand2, 0x00, 0x08,
-            0x02, 0x00, 0x00, 0x55, 0x66,
-            (self.sequence_number >> 8) & 0xFF,
-            self.sequence_number & 0xFF,
-            0x00, 0x00, 0x00 
-        ])
-        end_packet.append(0x0E) 
-        end_packet.append(0x00) 
+        end_packet = bytearray([0x75, random.randint(0, 127), random.randint(0, 127), 0x00, 0x08, 0x02, 0x00, 0x00, 0x55, 0x66, (self.sequence_number >> 8) & 0xFF, self.sequence_number & 0xFF, 0x00, 0x00, 0x00, 0x0E, 0x00])
         try: 
             self.sock_send.sendto(end_packet, (target_ip, port))
             self.sock_send.sendto(end_packet, ("127.0.0.1", port))
@@ -565,114 +515,121 @@ class NetworkManager:
                     for ch in range(8):
                         offset = 2 + (ch * 171) + 1 
                         ch_data = data[offset : offset + 64] 
-                        
                         for led_idx, val in enumerate(ch_data):
                             global_idx = (ch * 64) + led_idx
-                            is_pressed = (val == 0xCC)
-                            self.game.button_states[global_idx] = is_pressed
-            except Exception:
-                pass
+                            self.game.button_states[global_idx] = (val == 0xCC)
+            except Exception: pass
 
     def start_bg(self):
-        t1 = threading.Thread(target=self.send_loop)
-        t2 = threading.Thread(target=self.recv_loop)
-        t1.daemon = True
-        t2.daemon = True
+        t1 = threading.Thread(target=self.send_loop, daemon=True)
+        t2 = threading.Thread(target=self.recv_loop, daemon=True)
         t1.start()
         t2.start()
 
+def game_thread_func(game):
+    while game.running:
+        game.tick()
+        time.sleep(0.01)
 
 # --- GUI Manager ---
 
-class TNTGUI:
+class TNTRunGUI:
     def __init__(self, root, game, net):
         self.root = root
         self.game = game
         self.net = net
-        self.root.title("TNT Run Control Panel")
-        self.root.geometry("420x460") # Made the window slightly taller and wider
+        
+        # --- Screen 1: Outside Control Panel ---
+        self.root.title("OUTSIDE SCREEN - TNT Run Control")
+        self.root.geometry("1920x1080")
         self.root.resizable(False, False)
 
-        # --- Color Palette ---
-        self.bg_color = "#1E1E2E" # Sleek dark background
+        self.bg_color = "#050505"
         self.root.configure(bg=self.bg_color)
 
-        # Status Display (Looks like an arcade screen)
+        self.container = tk.Frame(root, bg=self.bg_color)
+        self.container.pack(expand=True)
+
         self.status_var = tk.StringVar()
         self.status_label = tk.Label(
-            root, textvariable=self.status_var, 
-            font=("Consolas", 15, "bold"), 
-            bg="#313244", fg="#A6E3A1", # Dark grey panel with bright green text
-            width=30, height=3, relief="sunken", bd=4
+            self.container, textvariable=self.status_var, 
+            font=("Consolas", 48, "bold"), 
+            bg="#111111", fg="#00FF00", 
+            width=25, height=3, relief="ridge", bd=8
         )
-        self.status_label.pack(pady=20)
+        self.status_label.pack(pady=50)
 
-        # Title for the buttons
         tk.Label(
-            root, text="Select Players to Start:", 
-            font=("Arial", 12, "bold"), 
-            bg=self.bg_color, fg="#CDD6F4"
-        ).pack(pady=5)
+            self.container, text="SELECT PLAYERS TO START", 
+            font=("Arial", 24, "bold"), 
+            bg=self.bg_color, fg="#FFFFFF"
+        ).pack(pady=10)
 
-        # Control Frame (3x3 Grid for Players)
-        control_frame = tk.Frame(root, bg=self.bg_color)
-        control_frame.pack(pady=5)
+        # Control Frame (Grid for Players)
+        control_frame = tk.Frame(self.container, bg=self.bg_color)
+        control_frame.pack(pady=20)
 
-        # A vibrant list of hex colors for the 9 buttons
         btn_colors = [
-            "#89B4FA", "#74C7EC", "#89DCEB", 
-            "#F9E2AF", "#FAB387", "#F38BA8", 
-            "#EBA0AC", "#F5C2E7", "#CBA6F7"
+            "#FF0044", "#00FF44", "#0088FF", 
+            "#FFFF00", "#FF00FF", "#00FFFF", 
+            "#FF8800", "#A6E3A1", "#CBA6F7"
         ]
 
         # Generate buttons 2 through 10
         for i in range(2, 11):
             idx = i - 2
-            row = idx // 3
-            col = idx % 3
-            
             btn = tk.Button(
-                control_frame, text=f"{i} Players", 
-                font=("Arial", 11, "bold"),
-                bg=btn_colors[idx], fg="#11111B", # Colored background, dark text
-                activebackground="#FFFFFF", # Flashes white when clicked
-                width=10, height=2, bd=3,
-                command=lambda num=i: self.start_game(num) # Passes the exact number
+                control_frame, text=f"{i} PLAYERS", 
+                font=("Arial", 18, "bold"), 
+                bg=btn_colors[idx], fg="#000000",
+                activebackground="#FFFFFF", activeforeground="#000000",
+                width=14, height=3, bd=6,
+                command=lambda num=i: self.start_game(num)
             )
-            btn.grid(row=row, column=col, padx=5, pady=5)
+            btn.grid(row=idx//3, column=idx%3, padx=15, pady=15)
 
-        # Additional Controls Frame (Bottom Row)
-        action_frame = tk.Frame(root, bg=self.bg_color)
-        action_frame.pack(pady=15)
+        action_frame = tk.Frame(self.container, bg=self.bg_color)
+        action_frame.pack(pady=50)
 
-        # Restart Button (Yellow/Orange)
-        self.restart_btn = tk.Button(
-            action_frame, text="↻ Restart", 
-            font=("Arial", 11, "bold"), 
-            bg="#F9E2AF", fg="#11111B",
-            width=12, height=2, bd=3,
+        tk.Button(
+            action_frame, text="RESTART", font=("Arial", 20, "bold"), 
+            bg="#FFFFFF", fg="#000000", width=15, height=2, bd=6, 
             command=self.restart_round
-        )
-        self.restart_btn.grid(row=0, column=0, padx=10)
-
-        # Quit Button (Red)
-        self.quit_btn = tk.Button(
-            action_frame, text="✖ Quit", 
-            font=("Arial", 11, "bold"), 
-            bg="#F38BA8", fg="#11111B",
-            width=12, height=2, bd=3,
+        ).grid(row=0, column=0, padx=30)
+        
+        tk.Button(
+            action_frame, text="QUIT", font=("Arial", 20, "bold"), 
+            bg="#444444", fg="#FFFFFF", width=15, height=2, bd=6, 
             command=self.quit_app
-        )
-        self.quit_btn.grid(row=0, column=1, padx=10)
+        ).grid(row=0, column=1, padx=30)
 
-        # Handle window close button (X)
+        # --- Screen 2: Inside Live Scoreboard ---
+        self.score_window = tk.Toplevel(self.root)
+        self.score_window.title("INSIDE SCREEN - TNT Run Live Stats")
+        self.score_window.geometry("1920x1080")
+        self.score_window.configure(bg="#050505")
+
+        self.inner_container = tk.Frame(self.score_window, bg="#050505")
+        self.inner_container.pack(expand=True)
+
+        tk.Label(self.inner_container, text="TNT RUN", font=("Consolas", 100, "bold"), bg="#050505", fg="#00FFFF").pack(pady=50)
+
+        # Huge Players Alive Tracker
+        self.inside_players_var = tk.StringVar(value="PLAYERS: --")
+        self.inside_players_label = tk.Label(self.inner_container, textvariable=self.inside_players_var, font=("Consolas", 80, "bold"), bg="#050505", fg="#555555")
+        self.inside_players_label.pack(pady=30)
+
+        # Huge Time Tracker
+        self.inside_timer_var = tk.StringVar(value="TIME: --:--")
+        self.inside_timer_label = tk.Label(self.inner_container, textvariable=self.inside_timer_var, font=("Consolas", 80, "bold"), bg="#050505", fg="#555555")
+        self.inside_timer_label.pack(pady=30)
+
         self.root.protocol("WM_DELETE_WINDOW", self.quit_app)
-
-        # Start background loop to update the UI
+        self.score_window.protocol("WM_DELETE_WINDOW", self.quit_app)
+        
         self.update_loop()
 
     def start_game(self, num_players):
-        # Directly starts the game with the number passed from the button
         self.game.start_game(num_players)
 
     def restart_round(self):
@@ -684,38 +641,62 @@ class TNTGUI:
         self.root.destroy()
 
     def update_loop(self):
-        # Update the UI texts based on game state
-        state = self.game.state
-        players = self.game.players_remaining
-        
-        if state == "LOBBY":
-            display_text = "LOBBY\nReady to start!"
-            self.status_label.config(fg="#89B4FA") # Blue text
-        elif state == "STARTUP":
-            display_text = "STARTING...\nGet ready!"
-            self.status_label.config(fg="#F9E2AF") # Yellow text
-        elif state == "PLAYING":
-            display_text = f"PLAYING\nPlayers Left: {players}"
-            self.status_label.config(fg="#A6E3A1") # Green text
-        elif state in ["PAUSED", "COUNTDOWN"]:
-            display_text = f"PAUSED (Elimination!)\nPlayers Left: {players}"
-            self.status_label.config(fg="#FAB387") # Orange text
-        elif state == "WINNER":
-            display_text = "WE HAVE A WINNER!"
-            self.status_label.config(fg="#F38BA8") # Red text
-        else:
-            display_text = state
+        with self.game.lock: # Safety lock for multi-threading
+            state = self.game.state
+            players = self.game.players_remaining
+            
+            # Format elapsed time
+            total_seconds = int(self.game.total_play_time)
+            mins, secs = divmod(total_seconds, 60)
+            time_str = f"{mins:02d}:{secs:02d}"
 
-        self.status_var.set(display_text)
-        
-        # Schedule the next update in 100 milliseconds
+            # --- Update OUTSIDE Control Panel ---
+            if state == "LOBBY":
+                display_text = "LOBBY\nReady to start!"
+                self.status_label.config(fg="#00FFFF") 
+            elif state == "STARTUP":
+                display_text = "STARTING...\nGet ready!"
+                self.status_label.config(fg="#FFFF00") 
+            elif state == "PLAYING":
+                display_text = f"PLAYING\nPlayers Left: {players}"
+                self.status_label.config(fg="#00FF44") 
+            elif state in ["PAUSED", "COUNTDOWN"]:
+                display_text = f"PAUSED (Elimination!)\nPlayers Left: {players}"
+                self.status_label.config(fg="#FF8800") 
+            elif state == "WINNER":
+                display_text = "WE HAVE A WINNER!"
+                self.status_label.config(fg="#FF00FF") 
+            else:
+                display_text = state
+
+            self.status_var.set(display_text)
+            
+            # --- Update INSIDE Live Scoreboard ---
+            if state == "LOBBY":
+                self.inside_players_var.set("WAITING")
+                self.inside_players_label.config(fg="#555555")
+                self.inside_timer_var.set("TIME: --:--")
+                self.inside_timer_label.config(fg="#555555")
+            elif state == "STARTUP":
+                self.inside_players_var.set("GET READY!")
+                self.inside_players_label.config(fg="#FFFF00")
+                self.inside_timer_var.set("TIME: 00:00")
+                self.inside_timer_label.config(fg="#FFFF00")
+            elif state in ["PLAYING", "PAUSED", "COUNTDOWN"]:
+                self.inside_players_var.set(f"ALIVE: {players}")
+                # Color code players left: Red if only 1 (or 0), otherwise Green
+                self.inside_players_label.config(fg="#FF0044" if players <= 1 else "#00FF44")
+                
+                self.inside_timer_var.set(f"TIME: {time_str}")
+                self.inside_timer_label.config(fg="#00FFFF")
+            elif state == "WINNER":
+                self.inside_players_var.set("WINNER!")
+                self.inside_players_label.config(fg="#FF00FF")
+                self.inside_timer_var.set(f"SURVIVED: {time_str}")
+                self.inside_timer_label.config(fg="#00FFFF")
+
         self.root.after(100, self.update_loop)
 
-
-def game_thread_func(game):
-    while game.running:
-        game.tick()
-        time.sleep(0.01)
 
 if __name__ == "__main__":
     game = TRGame()
@@ -726,13 +707,9 @@ if __name__ == "__main__":
     gt.daemon = True
     gt.start()
     
-    # Initialize Tkinter GUI
     root = tk.Tk()
-    gui = TNTGUI(root, game, net)
+    gui = TNTRunGUI(root, game, net)
     
-    print("TNT Run GUI Server Running...")
-    
-    # Start the GUI event loop
+    print("TNT Run GUI Running. Two screens active!")
     root.mainloop()
-    
     print("Exiting...")

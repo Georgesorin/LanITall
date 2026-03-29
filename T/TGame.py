@@ -13,8 +13,8 @@ pygame.mixer.init()
 
 # --- Setări de Rețea UDP Matrice ---
 UDP_SEND_IP = "255.255.255.255"
-UDP_SEND_PORT = 1068
-UDP_LISTEN_PORT = 1070
+UDP_SEND_PORT = 4626
+UDP_LISTEN_PORT = 7800
 
 # --- Setari Retea GUI (Local IPC) ---
 GUI_SEND_PORT = 1071
@@ -235,10 +235,10 @@ class SequenceGame:
         elif self.state == "SHOW_WIN":
             if elapsed >= 5.0:
                 if self.is_final_win:
-                    print("Jocul s-a încheiat complet. Așteptare comenzi...")
-                    self.state = "WAITING_FOR_START"
-                else:
-                    self.restart_game()
+                    print("Victorie finală! Scorurile au fost resetate pentru o nouă confruntare.")
+                    self.scores = [0] * self.num_players
+                    self.is_final_win = False
+                self.restart_game()
 
         elif self.state == "PLAYER_TURN":
             for flat_idx in just_pressed:
@@ -250,7 +250,6 @@ class SequenceGame:
                 if self.current_step < len(self.sequence):
                     expected_tile = self.sequence[self.current_step]
                     if (x, y) == expected_tile:
-                        # Redă sunetul din secvența existentă
                         self.play_sound(f"note_{self.current_step}.wav")
                         self.current_step += 1
                     elif (x, y) in self.sequence:
@@ -266,7 +265,6 @@ class SequenceGame:
                     if (x, y) in self.sequence:
                         pass
                     else:
-                        # S-a adăugat un tile nou la secvență. Va reda DOAR nota din gamă.
                         self.sequence.append((x, y))
                         self.play_sound(f"note_{self.current_step}.wav")
                         self.current_step += 1
@@ -276,7 +274,18 @@ class SequenceGame:
                         break
 
         elif self.state == "TURN_SUCCESS":
-            if elapsed > 3.0:
+            for flat_idx in just_pressed:
+                x, y = get_xy_from_flat(flat_idx)
+
+                if is_playable(x, y) and (x, y) not in self.sequence:
+                    self.state = "TURN_FAIL"
+                    self.state_time = now
+                    self.wrong_tile = (x, y)
+                    print(f"Greșeală! S-a apăsat un tile extra {(x, y)} după terminarea turei.")
+                    self.play_sound("fail.wav")
+                    break
+
+            if self.state == "TURN_SUCCESS" and elapsed > 3.0:
                 self.advance_to_next_player()
 
         elif self.state == "TURN_FAIL":
