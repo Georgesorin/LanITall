@@ -6,7 +6,6 @@ import math
 import psutil
 import os
 import tkinter as tk
-from tkinter import ttk
 
 try:
     import pygame
@@ -80,7 +79,7 @@ def run_discovery_flow():
             data, addr = sock.recvfrom(1024)
             if len(data) >= 30 and data[0] == 0x68 and data[1] == r1 and data[2] == r2:
                 devices.append(addr[0])
-                print(f" ✅ Found Evil Eye at {addr[0]}")
+                print(f"Found Evil Eye at {addr[0]}")
         except: pass
     sock.close()
     return devices[0] if devices else "127.0.0.1"
@@ -121,19 +120,14 @@ class WhackAMoleGame:
         self.active_leds = {}
 
     def spawn_mole(self, pid):
-        """Spawns a new target for a specific player."""
         p = self.active_players[pid]
         leds = [1, 2, 3, 4, 5] if p['side'] == 'left' else [6, 7, 8, 9, 10]
         
-        # 20% chance it's a trap (Red), 80% chance it's good (Green)
         p['target_is_red'] = (random.random() < 0.2)
-        
-        # Pick a random LED that isn't currently the active one
         choices = [l for l in leds if l != p.get('target_led')]
         p['target_led'] = random.choice(choices)
         
         p['target_time'] = time.time()
-        # Moles stay active between 1.0 and 1.8 seconds before disappearing
         p['target_duration'] = random.uniform(1.0, 1.8)
 
     def tick(self):
@@ -148,12 +142,12 @@ class WhackAMoleGame:
                     is_left = (pid % 2 == 0)
                     leds = range(1, 6) if is_left else range(6, 11)
 
-                    if pid >= self.started_with: # UNUSED = Yellow
+                    if pid >= self.started_with: 
                         for led in leds: self.active_leds[(wall, led)] = (128, 128, 0)
-                    elif pid not in self.active_players: # ELIMINATED = Red Pulse
+                    elif pid not in self.active_players: 
                         pulse = int(127 + 127 * math.sin(now * 5))
                         for led in leds: self.active_leds[(wall, led)] = (pulse, 0, 0)
-                    elif self.state == "WINNER": # WINNER = Rainbow
+                    elif self.state == "WINNER": 
                         for led in leds:
                             r = int(127 + 127 * math.sin(now * 4 + led * 0.5))
                             g = int(127 + 127 * math.sin(now * 4 + led * 0.5 + 2))
@@ -178,27 +172,22 @@ class WhackAMoleGame:
                         self.active_leds[(p['wall'], ready_led)] = (0, 255, 0)
 
             elif self.state == "PLAYING":
-                # Check Round Timer
                 if now >= self.round_end_time:
                     self.end_round()
                     self.process_inputs()
                     return
 
-                # Render Moles & Handle Timeouts
                 for pid, p in self.active_players.items():
-                    # Has the mole expired?
                     if now - p['target_time'] > p['target_duration']:
                         if not p['target_is_red']:
-                            # Missed a Green Mole! Lose a point.
                             p['score'] -= 1
                         self.spawn_mole(pid)
                     
-                    # Draw the active mole
                     color = (255, 0, 0) if p['target_is_red'] else (0, 255, 0)
                     self.active_leds[(p['wall'], p['target_led'])] = color
 
             elif self.state == "ROUND_OVER":
-                if now > self.round_end_time + 3.0: # Wait 3 seconds to show elimination
+                if now > self.round_end_time + 3.0: 
                     self.state = "WAITING_READY"
                             
         self.process_inputs()
@@ -214,7 +203,7 @@ class WhackAMoleGame:
                     self.prev_states[(ch, led)] = is_pressed
 
     def handle_new_step(self, ch, led):
-        if led == 0: return # Ignore Eye
+        if led == 0: return 
         side = 'left' if led <= 5 else 'right'
         pid = (ch - 1) * 2 + (0 if side == 'left' else 1)
 
@@ -230,7 +219,6 @@ class WhackAMoleGame:
                     self.sound.play('success')
                     self.state = "PLAYING"
                     self.round_end_time = time.time() + ROUND_DURATION
-                    # Spawn the first mole for everyone
                     for alive_pid in self.active_players: self.spawn_mole(alive_pid)
             return
 
@@ -244,34 +232,23 @@ class WhackAMoleGame:
                     self.sound.play('good_hit')
                 self.spawn_mole(pid)
             else:
-                # Hit the wrong blank tile
                 p['score'] -= 1
                 self.sound.play('bad_hit')
 
     def end_round(self):
-        print("\n--- ROUND OVER SCORES ---")
-        for pid, p in self.active_players.items():
-            print(f"Player {pid}: {p['score']} pts")
-            
-        # Find the player with the lowest score
         lowest_pid = min(self.active_players.keys(), key=lambda k: self.active_players[k]['score'])
-        
-        print(f"❌ Player {lowest_pid} Eliminated with the lowest score!")
         self.sound.play('eliminate')
         del self.active_players[lowest_pid]
         
         if len(self.active_players) == 1:
-            winner_id = list(self.active_players.keys())[0]
-            print(f"🏆 WE HAVE A WINNER: Player {winner_id}!")
             self.sound.play('win')
             self.state = "WINNER"
         else:
-            # Reset scores and ready state for survivors
             for p in self.active_players.values():
                 p['score'] = 0
                 p['ready'] = False
             self.state = "ROUND_OVER"
-            self.round_end_time = time.time() # Used to delay 3 seconds before next WAITING_READY
+            self.round_end_time = time.time() 
 
     def render(self):
         frame = bytearray(132)
@@ -287,7 +264,7 @@ class WhackAMoleGame:
     def start_game(self, num_players):
         with self.lock:
             if num_players > 8: num_players = 8
-            if num_players < 2: num_players = 2 # Need at least 2 for elimination!
+            if num_players < 2: num_players = 2 
             
             self.started_with = num_players
             self.active_players.clear()
@@ -378,46 +355,77 @@ class WhackAMoleGUI:
         self.root = root
         self.game = game
         self.net = net
-        self.root.title("Whack-A-Mole Control Panel")
-        self.root.geometry("450x450") 
-        self.root.resizable(False, False)
-
-        self.bg_color = "#1E1E2E"
+        
+        # --- Screen 1: Outside Control Panel ---
+        self.root.title("OUTSIDE SCREEN - Control Panel")
+        self.root.geometry("1920x1080") 
+        self.bg_color = "#050505" 
         self.root.configure(bg=self.bg_color)
+
+        self.container = tk.Frame(root, bg=self.bg_color)
+        self.container.pack(expand=True)
 
         self.status_var = tk.StringVar()
         self.status_label = tk.Label(
-            root, textvariable=self.status_var, 
-            font=("Consolas", 15, "bold"), 
-            bg="#313244", fg="#A6E3A1", 
-            width=30, height=3, relief="sunken", bd=4
+            self.container, textvariable=self.status_var, 
+            font=("Consolas", 48, "bold"), 
+            bg="#111111", fg="#00FF00", 
+            width=25, height=3, relief="ridge", bd=8
         )
-        self.status_label.pack(pady=20)
+        self.status_label.pack(pady=50)
 
-        tk.Label(root, text="Select Players to Start (Min 2, Max 8):", font=("Arial", 12, "bold"), bg=self.bg_color, fg="#CDD6F4").pack(pady=5)
+        tk.Label(self.container, text="SELECT PLAYERS TO START", font=("Arial", 24, "bold"), bg=self.bg_color, fg="#FFFFFF").pack(pady=10)
 
-        control_frame = tk.Frame(root, bg=self.bg_color)
-        control_frame.pack(pady=5)
+        control_frame = tk.Frame(self.container, bg=self.bg_color)
+        control_frame.pack(pady=20)
 
-        btn_colors = ["#89B4FA", "#74C7EC", "#89DCEB", "#F9E2AF", "#FAB387", "#F38BA8", "#EBA0AC", "#F5C2E7"]
+        btn_colors = ["#FF0044", "#00FF44", "#0088FF", "#FFFF00", "#FF00FF", "#00FFFF", "#FF8800"]
 
-        # Note: Start from 2 players since 1 player can't be eliminated
         for i in range(2, 9):
-            idx = i - 1
+            idx = i - 2
             btn = tk.Button(
-                control_frame, text=f"{i} Players", 
-                font=("Arial", 11, "bold"), bg=btn_colors[idx], fg="#11111B",
-                width=10, height=2, bd=3, command=lambda num=i: self.start_game(num)
+                control_frame, text=f"{i} PLAYERS", font=("Arial", 18, "bold"), 
+                bg=btn_colors[idx], fg="#000000", activebackground="#FFFFFF", activeforeground="#000000",
+                width=14, height=3, bd=6, command=lambda num=i: self.start_game(num)
             )
-            btn.grid(row=(i-2)//3, column=(i-2)%3, padx=5, pady=5)
+            if idx < 3: btn.grid(row=0, column=idx, padx=15, pady=15)
+            else: btn.grid(row=1, column=idx-3, padx=15, pady=15)
 
-        action_frame = tk.Frame(root, bg=self.bg_color)
-        action_frame.pack(pady=15)
+        action_frame = tk.Frame(self.container, bg=self.bg_color)
+        action_frame.pack(pady=50)
 
-        tk.Button(action_frame, text="↻ Restart", font=("Arial", 11, "bold"), bg="#F9E2AF", fg="#11111B", width=12, height=2, bd=3, command=self.restart_round).grid(row=0, column=0, padx=10)
-        tk.Button(action_frame, text="✖ Quit", font=("Arial", 11, "bold"), bg="#F38BA8", fg="#11111B", width=12, height=2, bd=3, command=self.quit_app).grid(row=0, column=1, padx=10)
+        tk.Button(action_frame, text="RESTART", font=("Arial", 20, "bold"), bg="#FFFFFF", fg="#000000", width=15, height=2, bd=6, command=self.restart_round).grid(row=0, column=0, padx=30)
+        tk.Button(action_frame, text="QUIT", font=("Arial", 20, "bold"), bg="#444444", fg="#FFFFFF", width=15, height=2, bd=6, command=self.quit_app).grid(row=0, column=1, padx=30)
+
+        # --- Screen 2: Inside Live Scoreboard ---
+        self.score_window = tk.Toplevel(self.root)
+        self.score_window.title("INSIDE SCREEN - Live Scores")
+        self.score_window.geometry("1920x1080")
+        self.score_window.configure(bg="#050505")
+        
+        tk.Label(self.score_window, text="LIVE SCOREBOARD", font=("Consolas", 64, "bold"), bg="#050505", fg="#00FFFF").pack(pady=20)
+        
+        self.inside_timer_var = tk.StringVar(value="TIME: --")
+        self.inside_timer_label = tk.Label(self.score_window, textvariable=self.inside_timer_var, font=("Consolas", 72, "bold"), bg="#050505", fg="#FFFF00")
+        self.inside_timer_label.pack(pady=10)
+
+        self.score_frame = tk.Frame(self.score_window, bg="#050505")
+        self.score_frame.pack(expand=True)
+
+        self.score_vars = []
+        self.score_labels = []
+
+        # 8 Score Boxes arranged in a 2x4 grid
+        for i in range(8):
+            var = tk.StringVar(value=f"PLAYER {i+1}\nWAITING")
+            lbl = tk.Label(self.score_frame, textvariable=var, font=("Consolas", 42, "bold"), bg="#111111", fg="#555555", width=10, height=3, relief="ridge", bd=6)
+            lbl.grid(row=i//4, column=i%4, padx=25, pady=25)
+            self.score_vars.append(var)
+            self.score_labels.append(lbl)
 
         self.root.protocol("WM_DELETE_WINDOW", self.quit_app)
+        self.score_window.protocol("WM_DELETE_WINDOW", self.quit_app)
+        
         self.update_loop()
 
     def start_game(self, num_players): self.game.start_game(num_players)
@@ -430,29 +438,63 @@ class WhackAMoleGUI:
     def update_loop(self):
         state = self.game.state
         
+        # --- Update OUTSIDE Control Panel ---
         if state == "LOBBY":
             display_text = "LOBBY\nReady to start!"
-            self.status_label.config(fg="#89B4FA") 
+            self.status_label.config(fg="#00FFFF") 
+            self.inside_timer_var.set("WAITING")
         elif state == "WAITING_READY":
             ready = sum(1 for p in self.game.active_players.values() if p['ready'])
             total = len(self.game.active_players)
             display_text = f"WAITING FOR PLAYERS\n{ready} / {total} Ready"
-            self.status_label.config(fg="#89DCEB") 
+            self.status_label.config(fg="#FFFF00") 
+            self.inside_timer_var.set(f"READY UP: {ready}/{total}")
         elif state == "PLAYING":
             time_left = max(0, int(self.game.round_end_time - time.time()))
             display_text = f"WHACK THOSE MOLES!\nTime Left: {time_left}s"
-            # Turn text orange in the last 10 seconds!
-            self.status_label.config(fg="#FAB387" if time_left <= 10 else "#A6E3A1")
+            self.status_label.config(fg="#FF0044" if time_left <= 10 else "#00FF44")
+            
+            # Format time as MM:SS for the big screen
+            mins, secs = divmod(time_left, 60)
+            self.inside_timer_var.set(f"TIME: {mins:02d}:{secs:02d}")
+            self.inside_timer_label.config(fg="#FF0044" if time_left <= 10 else "#FFFF00")
+            
         elif state == "ROUND_OVER":
-            display_text = "ROUND OVER!\nEliminating Lowest Score..."
-            self.status_label.config(fg="#F38BA8") 
+            display_text = "ROUND OVER!\nEliminating Lowest Score"
+            self.status_label.config(fg="#FF00FF") 
+            self.inside_timer_var.set("ELIMINATION!")
         elif state == "WINNER":
             display_text = "WE HAVE A WINNER!"
-            self.status_label.config(fg="#F38BA8") 
+            self.status_label.config(fg="#00FF44") 
+            self.inside_timer_var.set("WINNER!")
         else:
             display_text = state
 
         self.status_var.set(display_text)
+        
+        # --- Update INSIDE Scoreboard ---
+        for i in range(8):
+            if state == "LOBBY":
+                self.score_vars[i].set(f"PLAYER {i+1}\n--")
+                self.score_labels[i].config(fg="#555555")
+            else:
+                if i >= self.game.started_with:
+                    self.score_vars[i].set(f"PLAYER {i+1}\nN/A")
+                    self.score_labels[i].config(fg="#333333") # Dim grey for unselected slots
+                elif i in self.game.active_players:
+                    score = self.game.active_players[i]['score']
+                    
+                    if state == "WAITING_READY":
+                        ready_status = "READY!" if self.game.active_players[i]['ready'] else "PRESS GREEN"
+                        self.score_vars[i].set(f"PLAYER {i+1}\n{ready_status}")
+                        self.score_labels[i].config(fg="#00FF44" if self.game.active_players[i]['ready'] else "#FFFF00")
+                    else:
+                        self.score_vars[i].set(f"PLAYER {i+1}\n{score} PTS")
+                        self.score_labels[i].config(fg="#00FFFF") # Bright cyan for active scores
+                else:
+                    self.score_vars[i].set(f"PLAYER {i+1}\nOUT")
+                    self.score_labels[i].config(fg="#FF0044") # Red for eliminated players
+
         self.root.after(100, self.update_loop)
 
 # --- Execution ---
@@ -465,6 +507,6 @@ if __name__ == "__main__":
     
     root = tk.Tk()
     gui = WhackAMoleGUI(root, game, net)
-    print("\n🔨 Whack-A-Mole GUI Running. Check the new window!")
+    print("GUI Running. Two windows have been created!")
     root.mainloop()
     print("Exiting...")
