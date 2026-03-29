@@ -20,7 +20,7 @@ FRAME_DATA_LENGTH = NUM_CHANNELS * LEDS_PER_CHANNEL * 3
 WIDTH, HEIGHT = 16, 32
 
 BEATMAP_FILE = "level.json"
-AUDIO_FILE = "Rockefeller Street, Nightcore Version (8-bitRockDrum & Bass) Remix.wav"
+AUDIO_FILE = "Petre Stefan - PETER PARKER.wav"
 
 PURPLE  = (154, 66, 255)
 CYAN    = (0, 255, 255)

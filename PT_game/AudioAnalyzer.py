@@ -76,7 +76,7 @@ def generate_beatmap(audio_path, output_json, offset=0.0, beat_divider=1):
     print(f"Salvat în: {output_json}")
 
 if __name__ == "__main__":
-    AUDIO_FILE = "Rockefeller Street, Nightcore Version (8-bitRockDrum & Bass) Remix.wav" 
+    AUDIO_FILE = "Petre Stefan - PETER PARKER.wav" 
     JSON_OUTPUT = "level.json"
     
     # CALIBRARE HARDWARE - n am avut neaparat nevoie acum
@@ -86,6 +86,6 @@ if __name__ == "__main__":
     # 1 = Un pas pe fiecare beat (Foarte rapid pentru piese DnB/Nightcore)
     # 2 = Un pas la fiecare al doilea beat (Ritm de "Half-time", perfect pe toba mare, mult mai jucabil)
     # 4 = Un pas la fiecare al 4-lea beat (Foarte relaxant/ușor)
-    DIVIDER = 1
+    DIVIDER = 2
     
     generate_beatmap(AUDIO_FILE, JSON_OUTPUT, offset=AUDIO_OFFSET, beat_divider=DIVIDER)

@@ -188,7 +188,7 @@ class ScavengerHunt:
         self.running = True
         self.lock = threading.RLock()
         self.sound = SoundManager()
-        
+         
         self.state = "LOBBY"
         self.num_players = 0
         self.current_round = 1
