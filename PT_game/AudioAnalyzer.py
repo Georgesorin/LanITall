@@ -3,7 +3,6 @@ import numpy as np
 import json
 import warnings
 
-# Ignorăm avertismentele
 warnings.filterwarnings('ignore')
 
 def get_column_from_note(note_string):
@@ -15,34 +14,34 @@ def get_column_from_note(note_string):
     elif base_note == 'B':        return 3
     return np.random.randint(0, 4)
 
-def generate_beatmap(audio_path, output_json, offset=0.0):
-    print(f"Analizez piesa: {audio_path}...")
-    print("Așteaptă puțin, extragem tempo-ul și ritmul...")
+def generate_beatmap(audio_path, output_json, offset=0.0, beat_divider=1):
+    print("Se extrage tempo-ul și ritmul...")
 
-    # Încărcăm piesa
+    # incarcare de piesa
     y, sr = librosa.load(audio_path)
 
-    # 1. Extragem energia audio
+    # extragere energie audio
     onset_env = librosa.onset.onset_strength(y=y, sr=sr)
     
-    # 2. GĂSIM RITMUL (Aici este secretul pentru a fi 'pe beat')
-    # beat_track găsește BPM-ul și aliniază cadrele exact pe ritmul principal (kick/snare)
+    # det ritm
     tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, onset_envelope=onset_env)
     
-    # Transformăm cadrele de beat în timp real (secunde)
+    # adaugam un fel de delay in cod, sar peste cateva esantioane
+    beat_frames = beat_frames[::beat_divider]
+    
+    # trec in analog
     beat_times = librosa.frames_to_time(beat_frames, sr=sr)
 
-    # Extragem înălțimea sunetelor pentru maparea coloanelor
+    # mapez coloanele in functie de frecv lor maxima
     pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
 
     beatmap = []
     last_time = -1.0 
 
     for i, time_sec in enumerate(beat_times):
-        # 3. Aplicăm calibrarea hardware-ului
         adjusted_time = time_sec + offset
         
-        # Oprim notele care se suprapun tehnic (deși beaturile sunt natural spațiate corect)
+        # oprim notele care se suprapun tehnic 
         if adjusted_time - last_time < 0.2:
             continue
         
@@ -68,21 +67,25 @@ def generate_beatmap(audio_path, output_json, offset=0.0):
     with open(output_json, 'w') as f:
         json.dump(beatmap, f, indent=4)
 
-    # Formatăm tempo-ul curat, indiferent dacă librosa returnează array sau float
+    # tempo curat, indiferent de tipul de return
     bpm_val = tempo[0] if isinstance(tempo, (list, np.ndarray)) else tempo
+    perceived_bpm = bpm_val / beat_divider
 
-    print(f"Gata! Am generat {len(beatmap)} tile-uri perfect pe ritm.")
-    print(f"BPM Detectat: {round(bpm_val, 2)}")
+    print(f"S a generat {len(beatmap)} tile-uri perfect pe ritm.")
+    print(f"BPM Original: {round(bpm_val, 2)} | BPM Jucabil: {round(perceived_bpm, 2)}")
     print(f"Salvat în: {output_json}")
 
 if __name__ == "__main__":
-    # Pune aici numele exact al fișierului tău
     AUDIO_FILE = "Rockefeller Street, Nightcore Version (8-bitRockDrum & Bass) Remix.wav" 
     JSON_OUTPUT = "level.json"
     
-    # CALIBRARE HARDWARE:
-    # Dacă tile-urile ajung JOS puțin *înainte* de a se auzi bass-ul, pune o valoare pozitivă (ex: 0.1)
-    # Dacă tile-urile ajung JOS puțin *după* ce se aude bass-ul, pune o valoare negativă (ex: -0.1)
+    # CALIBRARE HARDWARE - n am avut neaparat nevoie acum
     AUDIO_OFFSET = 0.0 
     
-    generate_beatmap(AUDIO_FILE, JSON_OUTPUT, offset=AUDIO_OFFSET)
+    # --- CONTROLUL DENSITĂȚII TILE-URILOR ---
+    # 1 = Un pas pe fiecare beat (Foarte rapid pentru piese DnB/Nightcore)
+    # 2 = Un pas la fiecare al doilea beat (Ritm de "Half-time", perfect pe toba mare, mult mai jucabil)
+    # 4 = Un pas la fiecare al 4-lea beat (Foarte relaxant/ușor)
+    DIVIDER = 1
+    
+    generate_beatmap(AUDIO_FILE, JSON_OUTPUT, offset=AUDIO_OFFSET, beat_divider=DIVIDER)
