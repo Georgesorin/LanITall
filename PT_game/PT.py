@@ -11,8 +11,8 @@ import tkinter as tk
 # --- Configurație Rețea Conform Documentației ---
 UDP_IP_BROADCAST = "255.255.255.255"
 UDP_IP_LOCAL = "127.0.0.1"           
-UDP_PORT_SEND = 1067
-UDP_PORT_RECV = 1069
+UDP_PORT_SEND = 4626
+UDP_PORT_RECV = 7800
 
 NUM_CHANNELS = 8
 LEDS_PER_CHANNEL = 64
