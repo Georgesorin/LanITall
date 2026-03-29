@@ -7,6 +7,9 @@ import psutil
 import os
 import tkinter as tk
 
+# --- FORCE PYGAME TO IGNORE VIDEO DRIVERS (Prevents X11 Crashes) ---
+os.environ["SDL_VIDEODRIVER"] = "dummy"
+
 try:
     import pygame
     PYGAME_AVAILABLE = True
@@ -400,13 +403,18 @@ class WhackAMoleGUI:
         # --- Screen 2: Inside Live Scoreboard ---
         self.score_window = tk.Toplevel(self.root)
         self.score_window.title("INSIDE SCREEN - Live Scores")
-        self.score_window.geometry("1920x1080")
+        
+        # --- REDUCED SIZE FOR LOWER RESOLUTION SCREENS ---
+        self.score_window.geometry("1280x720")
         self.score_window.configure(bg="#050505")
         
-        tk.Label(self.score_window, text="LIVE SCOREBOARD", font=("Consolas", 64, "bold"), bg="#050505", fg="#00FFFF").pack(pady=20)
+        # Shrunk Title Font & Padding
+        tk.Label(self.score_window, text="LIVE SCOREBOARD", font=("Consolas", 48, "bold"), bg="#050505", fg="#00FFFF").pack(pady=10)
         
         self.inside_timer_var = tk.StringVar(value="TIME: --")
-        self.inside_timer_label = tk.Label(self.score_window, textvariable=self.inside_timer_var, font=("Consolas", 72, "bold"), bg="#050505", fg="#FFFF00")
+        
+        # Shrunk Timer Font & Padding
+        self.inside_timer_label = tk.Label(self.score_window, textvariable=self.inside_timer_var, font=("Consolas", 54, "bold"), bg="#050505", fg="#FFFF00")
         self.inside_timer_label.pack(pady=10)
 
         self.score_frame = tk.Frame(self.score_window, bg="#050505")
@@ -418,8 +426,9 @@ class WhackAMoleGUI:
         # 8 Score Boxes arranged in a 2x4 grid
         for i in range(8):
             var = tk.StringVar(value=f"PLAYER {i+1}\nWAITING")
-            lbl = tk.Label(self.score_frame, textvariable=var, font=("Consolas", 42, "bold"), bg="#111111", fg="#555555", width=10, height=3, relief="ridge", bd=6)
-            lbl.grid(row=i//4, column=i%4, padx=25, pady=25)
+            # Shrunk Player Box Fonts & Spacing
+            lbl = tk.Label(self.score_frame, textvariable=var, font=("Consolas", 28, "bold"), bg="#111111", fg="#555555", width=12, height=3, relief="ridge", bd=6)
+            lbl.grid(row=i//4, column=i%4, padx=15, pady=15)
             self.score_vars.append(var)
             self.score_labels.append(lbl)
 
@@ -436,64 +445,65 @@ class WhackAMoleGUI:
         self.root.destroy()
 
     def update_loop(self):
-        state = self.game.state
-        
-        # --- Update OUTSIDE Control Panel ---
-        if state == "LOBBY":
-            display_text = "LOBBY\nReady to start!"
-            self.status_label.config(fg="#00FFFF") 
-            self.inside_timer_var.set("WAITING")
-        elif state == "WAITING_READY":
-            ready = sum(1 for p in self.game.active_players.values() if p['ready'])
-            total = len(self.game.active_players)
-            display_text = f"WAITING FOR PLAYERS\n{ready} / {total} Ready"
-            self.status_label.config(fg="#FFFF00") 
-            self.inside_timer_var.set(f"READY UP: {ready}/{total}")
-        elif state == "PLAYING":
-            time_left = max(0, int(self.game.round_end_time - time.time()))
-            display_text = f"WHACK THOSE MOLES!\nTime Left: {time_left}s"
-            self.status_label.config(fg="#FF0044" if time_left <= 10 else "#00FF44")
+        with self.game.lock:
+            state = self.game.state
             
-            # Format time as MM:SS for the big screen
-            mins, secs = divmod(time_left, 60)
-            self.inside_timer_var.set(f"TIME: {mins:02d}:{secs:02d}")
-            self.inside_timer_label.config(fg="#FF0044" if time_left <= 10 else "#FFFF00")
-            
-        elif state == "ROUND_OVER":
-            display_text = "ROUND OVER!\nEliminating Lowest Score"
-            self.status_label.config(fg="#FF00FF") 
-            self.inside_timer_var.set("ELIMINATION!")
-        elif state == "WINNER":
-            display_text = "WE HAVE A WINNER!"
-            self.status_label.config(fg="#00FF44") 
-            self.inside_timer_var.set("WINNER!")
-        else:
-            display_text = state
-
-        self.status_var.set(display_text)
-        
-        # --- Update INSIDE Scoreboard ---
-        for i in range(8):
+            # --- Update OUTSIDE Control Panel ---
             if state == "LOBBY":
-                self.score_vars[i].set(f"PLAYER {i+1}\n--")
-                self.score_labels[i].config(fg="#555555")
+                display_text = "LOBBY\nReady to start!"
+                self.status_label.config(fg="#00FFFF") 
+                self.inside_timer_var.set("WAITING")
+            elif state == "WAITING_READY":
+                ready = sum(1 for p in self.game.active_players.values() if p['ready'])
+                total = len(self.game.active_players)
+                display_text = f"WAITING FOR PLAYERS\n{ready} / {total} Ready"
+                self.status_label.config(fg="#FFFF00") 
+                self.inside_timer_var.set(f"READY UP: {ready}/{total}")
+            elif state == "PLAYING":
+                time_left = max(0, int(self.game.round_end_time - time.time()))
+                display_text = f"WHACK THOSE MOLES!\nTime Left: {time_left}s"
+                self.status_label.config(fg="#FF0044" if time_left <= 10 else "#00FF44")
+                
+                # Format time as MM:SS for the big screen
+                mins, secs = divmod(time_left, 60)
+                self.inside_timer_var.set(f"TIME: {mins:02d}:{secs:02d}")
+                self.inside_timer_label.config(fg="#FF0044" if time_left <= 10 else "#FFFF00")
+                
+            elif state == "ROUND_OVER":
+                display_text = "ROUND OVER!\nEliminating Lowest Score"
+                self.status_label.config(fg="#FF00FF") 
+                self.inside_timer_var.set("ELIMINATION!")
+            elif state == "WINNER":
+                display_text = "WE HAVE A WINNER!"
+                self.status_label.config(fg="#00FF44") 
+                self.inside_timer_var.set("WINNER!")
             else:
-                if i >= self.game.started_with:
-                    self.score_vars[i].set(f"PLAYER {i+1}\nN/A")
-                    self.score_labels[i].config(fg="#333333") # Dim grey for unselected slots
-                elif i in self.game.active_players:
-                    score = self.game.active_players[i]['score']
-                    
-                    if state == "WAITING_READY":
-                        ready_status = "READY!" if self.game.active_players[i]['ready'] else "PRESS GREEN"
-                        self.score_vars[i].set(f"PLAYER {i+1}\n{ready_status}")
-                        self.score_labels[i].config(fg="#00FF44" if self.game.active_players[i]['ready'] else "#FFFF00")
-                    else:
-                        self.score_vars[i].set(f"PLAYER {i+1}\n{score} PTS")
-                        self.score_labels[i].config(fg="#00FFFF") # Bright cyan for active scores
+                display_text = state
+
+            self.status_var.set(display_text)
+            
+            # --- Update INSIDE Scoreboard ---
+            for i in range(8):
+                if state == "LOBBY":
+                    self.score_vars[i].set(f"PLAYER {i+1}\n--")
+                    self.score_labels[i].config(fg="#555555")
                 else:
-                    self.score_vars[i].set(f"PLAYER {i+1}\nOUT")
-                    self.score_labels[i].config(fg="#FF0044") # Red for eliminated players
+                    if i >= self.game.started_with:
+                        self.score_vars[i].set(f"PLAYER {i+1}\nN/A")
+                        self.score_labels[i].config(fg="#333333") 
+                    elif i in self.game.active_players:
+                        score = self.game.active_players[i]['score']
+                        
+                        if state == "WAITING_READY":
+                            ready_status = "READY!" if self.game.active_players[i]['ready'] else "PRESS GREEN"
+                            self.score_vars[i].set(f"PLAYER {i+1}\n{ready_status}")
+                            self.score_labels[i].config(fg="#00FF44" if self.game.active_players[i]['ready'] else "#FFFF00")
+                        else:
+                            self.score_vars[i].set(f"PLAYER {i+1}\n{score} PTS")
+                            self.score_labels[i].config(fg="#00FFFF") 
+                    else:
+                        self.score_vars[i].set(f"PLAYER {i+1}\nOUT")
+                        self.score_labels[i].config(fg="#FF0044") 
 
         self.root.after(100, self.update_loop)
 
