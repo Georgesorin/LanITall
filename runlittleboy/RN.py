@@ -114,60 +114,23 @@ def run_discovery_flow():
     return "127.0.0.1"
 
 
-# --- Sound Manager ---
-
-class SoundManager:
-    def __init__(self):
-        self.enabled = False
-        try:
-            if PYGAME_AVAILABLE:
-                pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
-                self.enabled = True
-                self.sounds = {}
-                self._load_sounds()
-            else:
-                print("Pygame module not found. Audio disabled.")
-        except Exception as e:
-            print(f"Audio init failed: {e}")
-            self.enabled = False
-
-    def _load_sounds(self):
-        if not os.path.exists("_sfx/animal_0.wav"):
-            print("Generating Animal SFX...")
-            SoundGenerator.generate_all()
-
-        sfx_files = {
-            'animal_0': '_sfx/animal_0.wav',
-            'animal_1': '_sfx/animal_1.wav',
-            'animal_2': '_sfx/animal_2.wav',
-            'animal_3': '_sfx/animal_3.wav',
-            'animal_4': '_sfx/animal_4.wav',
-            'success': '_sfx/success.wav',
-            'eliminate': '_sfx/eliminate.wav',
-            'win': '_sfx/win.wav',
-        }
-        
-        for name, path in sfx_files.items():
-            if os.path.exists(path):
-                try: self.sounds[name] = pygame.mixer.Sound(path)
-                except: print(f"Failed to load {path}")
-            else: print(f"Warning: Missing SFX {path}")
-
-    def play(self, name):
-        if not self.enabled: return
-        if name in self.sounds:
-            try: self.sounds[name].play()
-            except: pass
-
 # --- Game Logic ---
 
 class ScavengerHunt:
     def __init__(self):
         self.running = True
         self.lock = threading.RLock()
-        self.state = "LOBBY" # LOBBY, WAITING_START, ACTIVE, WINNER
+        
+        # Extended Game States
+        self.state = "LOBBY" # LOBBY, WAITING_START, ACTIVE, ROUND_WIN_ANIM, GAME_OVER
         self.num_players = 0
-        self.players = {} # {id: {"score": 0, "misses": 0, "target": (w, l), "finished": False}}
+        self.current_round = 1
+        self.max_rounds = 5
+        self.round_winner = None
+        self.overall_winners = []
+        self.anim_timer = 0
+        
+        self.players = {} # {id: {"score": 0, "misses": 0, "round_wins": 0, "target": (w, l), "finished": False}}
         
         self.button_states = {(ch, led): False for ch in range(1, 5) for led in range(11)}
         self.prev_states = {(ch, led): False for ch in range(1, 5) for led in range(11)}
@@ -176,9 +139,13 @@ class ScavengerHunt:
     def start_game(self, count):
         with self.lock:
             self.num_players = count
-            self.players = {i: {"score": 0, "misses": 0, "target": None, "finished": False} for i in range(1, count + 1)}
+            self.current_round = 1
+            # Initialize stats, including misses and round_wins
+            self.players = {i: {"score": 0, "misses": 0, "round_wins": 0, "target": None, "finished": False} for i in range(1, count + 1)}
             self.state = "WAITING_START"
-            print(f"\n🎮 Game set for {count} players. Press TILE 5 on ANY active wall to start!")
+            
+            print(f"\n🎮 Game set for {count} players. Match is {self.max_rounds} rounds!")
+            print(f"👉 Round {self.current_round}: Press and hold TILE 5 on ALL active walls to start!")
 
     def _spawn_target(self, p_id):
         # Target appears on any wall EXCEPT the player's home wall
@@ -190,9 +157,9 @@ class ScavengerHunt:
         with self.lock:
             self.active_leds.clear()
 
-            if self.state in ["LOBBY", "WINNER"]:
+            if self.state == "LOBBY":
                 pulse = int(127 + 127 * math.sin(now * 3))
-                color = (0, 255, 0) if self.state == "WINNER" else (pulse, 0, 0)
+                color = (pulse, 0, 0)
                 for ch in range(1, 5): self.active_leds[(ch, 0)] = color
                 return
 
@@ -201,11 +168,15 @@ class ScavengerHunt:
                 for p_id in self.players:
                     self.active_leds[(p_id, 0)] = (pulse, pulse, pulse) # Pulse eyes white
                 
-                # Check if Tile 5 is pressed on ANY active player wall (Simulator friendly)
-                if any(self.button_states[(p, 5)] for p in self.players):
-                    print("🚀 READY! GO!")
+                # Check if Tile 5 is pressed on ALL active player walls to start the round
+                if all(self.button_states[(p, 5)] for p in self.players):
+                    print(f"🚀 ROUND {self.current_round} START!")
                     self.state = "ACTIVE"
-                    for p_id in self.players: self._spawn_target(p_id)
+                    # Reset round-specific variables
+                    for p_id in self.players: 
+                        self.players[p_id]["score"] = 0
+                        self.players[p_id]["finished"] = False
+                        self._spawn_target(p_id)
 
             elif self.state == "ACTIVE":
                 for p_id, data in self.players.items():
@@ -220,6 +191,42 @@ class ScavengerHunt:
                         flash = color if int(now * 5) % 2 == 0 else (0, 0, 0)
                         self.active_leds[(p_id, 5)] = flash
                         self.active_leds[(p_id, 6)] = flash
+
+            elif self.state == "ROUND_WIN_ANIM":
+                elapsed = now - self.anim_timer
+                if elapsed < 3.0:
+                    # Blink the round winner's wall rapidly
+                    blink = WALL_COLORS[self.round_winner] if int(now * 10) % 2 == 0 else (0,0,0)
+                    for led in range(11): 
+                        self.active_leds[(self.round_winner, led)] = blink
+                        
+                    # Soft pulse the other eyes
+                    pulse = int(50 + 50 * math.sin(now * 5))
+                    for p in self.players:
+                        if p != self.round_winner:
+                            self.active_leds[(p, 0)] = (pulse, pulse, pulse)
+                else:
+                    if self.current_round < self.max_rounds:
+                        self.current_round += 1
+                        self.state = "WAITING_START"
+                        print(f"\n🟢 Round {self.current_round} / {self.max_rounds}")
+                        print("👉 Press and hold TILE 5 on ALL active walls to start the round!")
+                    else:
+                        self.state = "GAME_OVER"
+                        best_score = max(p["round_wins"] for p in self.players.values())
+                        self.overall_winners = [p for p, data in self.players.items() if data["round_wins"] == best_score]
+                        
+                        print("\n🏁 MATCH COMPLETE!")
+                        for p, d in self.players.items():
+                            print(f"  Player {p} -> {d['round_wins']} Round Wins | {d['misses']} Misses")
+                        print(f"🏆 Overall Winner(s): {self.overall_winners}")
+
+            elif self.state == "GAME_OVER":
+                # Big rainbow animation for the overall winner(s)
+                rainbow = (int(127+127*math.sin(now)), int(127+127*math.sin(now+2)), int(127+127*math.sin(now+4)))
+                for win_id in self.overall_winners:
+                    for led in range(11):
+                        self.active_leds[(win_id, led)] = rainbow
 
             self.process_inputs()
 
@@ -250,8 +257,11 @@ class ScavengerHunt:
                                 else:
                                     # Win by hitting home base (Tile 5 or 6 on YOUR wall)
                                     if ch == p_id and led in (5, 6):
-                                        print(f"🏆 PLAYER {p_id} WINS THE GAME! (Total Misses: {data['misses']})")
-                                        self.state = "WINNER"
+                                        self.round_winner = p_id
+                                        data["round_wins"] += 1
+                                        print(f"🎉 PLAYER {p_id} WINS ROUND {self.current_round}!")
+                                        self.state = "ROUND_WIN_ANIM"
+                                        self.anim_timer = time.time()
                     
                     self.prev_states[(ch, led)] = is_pressed
 
