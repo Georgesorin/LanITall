@@ -13,8 +13,8 @@ pygame.mixer.init()
 
 # --- Setări de Rețea UDP Matrice ---
 UDP_SEND_IP = "255.255.255.255"
-UDP_SEND_PORT = 1068
-UDP_LISTEN_PORT = 1070
+UDP_SEND_PORT = 4626
+UDP_LISTEN_PORT = 7800
 
 # --- Setari Retea GUI (Local IPC) ---
 GUI_SEND_PORT = 1071
@@ -574,17 +574,18 @@ class GameDisplays:
     def setup_scoreboard(self):
         self.score_window = tk.Toplevel(self.root)
         self.score_window.title("Scoreboard (Non-Touch)")
-        self.score_window.geometry("500x500")
+        self.score_window.geometry("500x600") # Am mărit puțin și fereastra pe înălțime pentru a face loc fontului mai mare
         self.score_window.configure(bg="#000000")
 
-        self.lbl_state = tk.Label(self.score_window, text="Așteptare Start...", font=("Arial", 24, "bold"), bg="black", fg="#f1c40f")
+        self.lbl_state = tk.Label(self.score_window, text="Sequence Builder", font=("Arial", 24, "bold"), bg="black", fg="#f1c40f")
         self.lbl_state.pack(pady=20)
 
         self.lbl_turn = tk.Label(self.score_window, text="-", font=("Arial", 30, "bold"), bg="black", fg="#3498db")
         self.lbl_turn.pack(pady=10)
 
-        self.lbl_scores = tk.Label(self.score_window, text="Scoruri:\n-", font=("Arial", 18), bg="black", fg="white", justify=tk.LEFT)
-        self.lbl_scores.pack(pady=20)
+        # Aici este modificarea fontului pentru scoruri (dimensiune 32, bold, centrat)
+        self.lbl_scores = tk.Label(self.score_window, text="Scoruri:\n-", font=("Arial", 32, "bold"), bg="black", fg="white", justify=tk.CENTER)
+        self.lbl_scores.pack(pady=30)
 
         self.lbl_winner = tk.Label(self.score_window, text="", font=("Arial", 28, "bold"), bg="black", fg="#2ecc71")
         self.lbl_winner.pack(pady=20)
@@ -629,7 +630,8 @@ class GameDisplays:
 
     def update_scoreboard(self, state):
         game_state = state.get("state", "")
-        self.lbl_state.config(text=f"Stare: {game_state}")
+        # Titlul fix, ignorăm suprascrierea:
+        # self.lbl_state.config(text=f"Stare: {game_state}")
 
         turn = state.get("turn")
         if turn:
