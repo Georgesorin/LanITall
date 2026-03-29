@@ -7,6 +7,8 @@ import psutil
 import os
 import wave
 import struct
+import tkinter as tk
+from tkinter import font as tkfont
 
 try:
     import pygame
@@ -77,7 +79,7 @@ def synthesize_laser(filename, start_freq, end_freq, duration, wave_type='square
             wav_file.writeframes(struct.pack('<h', audio_val))
 
 def generate_all_sfx():
-    print("Forging lightsabers and loading blasters... (Generating Sci-Fi SFX)")
+    print("Generating Sci-Fi SFX...")
     synthesize_laser('_sfx/blaster_0.wav', 2000, 200, 0.25, 'square')
     synthesize_laser('_sfx/blaster_1.wav', 2200, 250, 0.25, 'square')
     synthesize_laser('_sfx/blaster_2.wav', 1800, 150, 0.30, 'square')
@@ -86,7 +88,6 @@ def generate_all_sfx():
     synthesize_laser('_sfx/success.wav', 400, 1200, 0.4, 'sine')
     synthesize_laser('_sfx/eliminate.wav', 300, 50, 0.6, 'sawtooth')
     synthesize_laser('_sfx/win.wav', 800, 2000, 1.5, 'sine')
-    print("Sci-Fi SFX Generation Complete!")
 
 class SoundManager:
     def __init__(self):
@@ -98,9 +99,8 @@ class SoundManager:
                 self.sounds = {}
                 self._load_sounds()
             else:
-                print("Pygame module not found. Audio disabled.")
+                print("Pygame disabled.")
         except Exception as e:
-            print(f"Audio init failed: {e}")
             self.enabled = False
 
     def _load_sounds(self):
@@ -121,8 +121,7 @@ class SoundManager:
         for name, path in sfx_files.items():
             if os.path.exists(path):
                 try: self.sounds[name] = pygame.mixer.Sound(path)
-                except: print(f"Failed to load {path}")
-            else: print(f"Warning: Missing SFX {path}")
+                except: pass
 
     def play(self, name):
         if not self.enabled: return
@@ -131,7 +130,6 @@ class SoundManager:
             except: pass
 
 # --- Discovery Flow ---
-
 def get_local_interfaces():
     interfaces = []
     for iface_name, addrs in psutil.net_if_addrs().items():
@@ -150,9 +148,7 @@ def build_discovery_packet():
 
 def run_discovery_flow():
     interfaces = get_local_interfaces()
-    if not interfaces:
-        print("No active network interfaces found.")
-        return None
+    if not interfaces: return "127.0.0.1"
         
     print("\n--- Network Selection ---")
     for i, (iface, ip, bcast) in enumerate(interfaces):
@@ -163,44 +159,27 @@ def run_discovery_flow():
         sel = interfaces[choice]
     except:
         sel = interfaces[0]
-        print("Invalid choice, defaulting to 0.")
         
-    print(f"Using {sel[0]} ({sel[1]})")
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    
     try: sock.bind((sel[1], 7800))
     except: pass
     
     pkt, r1, r2 = build_discovery_packet()
     try: sock.sendto(pkt, (sel[2], 4626))
-    except: return None
+    except: return "127.0.0.1"
     
-    print(" Listening for Evil Eye devices...")
     sock.settimeout(0.5)
-    end_time = time.time() + 3
-    devices = []
-    
+    end_time = time.time() + 2
     while time.time() < end_time:
         try:
             data, addr = sock.recvfrom(1024)
-            if len(data) >= 30 and data[0] == 0x68 and data[1] == r1 and data[2] == r2:
-                if addr[0] not in [d['ip'] for d in devices]:
-                    model = data[6:13].decode(errors='ignore').strip('\x00')
-                    devices.append({'ip': addr[0], 'model': model})
-                    print(f" ✅ Found {model} at {addr[0]}")
-        except socket.timeout: continue
+            if data[0] == 0x68 and data[1] == r1 and data[2] == r2:
+                sock.close()
+                return addr[0]
         except: pass
-        
     sock.close()
-    
-    if devices:
-        print(f"🎯 Targeting {devices[0]['ip']}\n")
-        return devices[0]['ip']
-        
-    print("❌ No devices found, using default 127.0.0.1\n")
     return "127.0.0.1"
-
 
 # --- Game Logic ---
 
@@ -210,17 +189,16 @@ class ScavengerHunt:
         self.lock = threading.RLock()
         self.sound = SoundManager()
         
-        # Extended Game States
-        self.state = "LOBBY" # LOBBY, WAITING_START, ACTIVE, ROUND_WIN_ANIM, GAME_OVER
+        self.state = "LOBBY"
         self.num_players = 0
         self.current_round = 1
-        self.max_rounds = 5
+        self.max_rounds = 8
         self.round_winner = None
         self.overall_winners = []
         self.anim_timer = 0
+        self.round_history = [] 
         
         self.players = {} 
-        
         self.button_states = {(ch, led): False for ch in range(1, 5) for led in range(11)}
         self.prev_states = {(ch, led): False for ch in range(1, 5) for led in range(11)}
         self.active_leds = {}
@@ -229,21 +207,16 @@ class ScavengerHunt:
         with self.lock:
             self.num_players = count
             self.current_round = 1
+            self.round_history.clear()
             self.players = {i: {"score": 0, "misses": 0, "round_wins": 0, "target": None, "finished": False} for i in range(1, count + 1)}
             self.state = "WAITING_START"
-            
-            print(f"\n🎮 Game set for {count} players. Match is {self.max_rounds} rounds!")
-            print(f"👉 Round {self.current_round}: Press and hold TILE 5 on ALL active walls to start!")
 
     def _spawn_target(self, p_id):
         other_walls = [w for w in range(1, 5) if w != p_id]
-        # Exclude 5 and 6 so targets NEVER overlap with the Start/Finish tiles
         valid_leds = [1, 2, 3, 4, 7, 8, 9, 10] 
         
         while True:
             target_candidate = (random.choice(other_walls), random.choice(valid_leds))
-            
-            # Ensure this tile isn't already someone else's active target
             is_occupied = False
             for other_p, data in self.players.items():
                 if other_p != p_id and data.get("target") == target_candidate:
@@ -269,20 +242,15 @@ class ScavengerHunt:
                 pulse = int(127 + 127 * math.sin(now * 10))
                 for p_id in self.players:
                     self.active_leds[(p_id, 0)] = (pulse, pulse, pulse) 
-                    
                     base_color = WALL_COLORS[p_id]
                     
-                    # Color the start tile (Tile 5)
-                    if self.button_states[(p_id, 5)]:
-                        # Tile turns into a significantly darker version of their assigned color when held
+                    if self.button_states[(p_id, 6)]:
                         dark_color = (base_color[0] // 4, base_color[1] // 4, base_color[2] // 4)
-                        self.active_leds[(p_id, 5)] = dark_color 
+                        self.active_leds[(p_id, 6)] = dark_color 
                     else:
-                        # Glows bright with the player's normal assigned color when waiting
-                        self.active_leds[(p_id, 5)] = base_color
+                        self.active_leds[(p_id, 6)] = base_color
                 
-                if all(self.button_states[(p, 5)] for p in self.players):
-                    print(f"🚀 ROUND {self.current_round} START!")
+                if all(self.button_states[(p, 6)] for p in self.players):
                     self.sound.play('success')
                     self.state = "ACTIVE"
                     for p_id in self.players: 
@@ -300,7 +268,6 @@ class ScavengerHunt:
                         self.active_leds[(t_w, t_l)] = color 
                     else:
                         flash = color if int(now * 5) % 2 == 0 else (0, 0, 0)
-                        self.active_leds[(p_id, 5)] = flash
                         self.active_leds[(p_id, 6)] = flash
 
             elif self.state == "ROUND_WIN_ANIM":
@@ -318,18 +285,11 @@ class ScavengerHunt:
                     if self.current_round < self.max_rounds:
                         self.current_round += 1
                         self.state = "WAITING_START"
-                        print(f"\n🟢 Round {self.current_round} / {self.max_rounds}")
-                        print("👉 Press and hold TILE 5 on ALL active walls to start the round!")
                     else:
                         self.state = "GAME_OVER"
                         best_score = max(p["round_wins"] for p in self.players.values())
                         self.overall_winners = [p for p, data in self.players.items() if data["round_wins"] == best_score]
-                        
                         self.sound.play('win')
-                        print("\n🏁 MATCH COMPLETE!")
-                        for p, d in self.players.items():
-                            print(f"  Player {p} -> {d['round_wins']} Round Wins | {d['misses']} Misses")
-                        print(f"🏆 Overall Winner(s): {self.overall_winners}")
 
             elif self.state == "GAME_OVER":
                 rainbow = (int(127+127*math.sin(now)), int(127+127*math.sin(now+2)), int(127+127*math.sin(now+4)))
@@ -353,23 +313,20 @@ class ScavengerHunt:
                                     if (ch, led) == data["target"]:
                                         data["score"] += 1
                                         self.sound.play(f'animal_{random.randint(0, 4)}')
-                                        print(f"👤 Player {p_id}: {data['score']}/5 caught!")
                                         if data["score"] >= 5:
                                             data["finished"] = True
                                             self.sound.play('success')
-                                            print(f"🏃 Player {p_id} FINISHED! Run back to Wall {p_id}!")
                                         else:
                                             self._spawn_target(p_id)
                                     elif ch == data["target"][0]:
                                         data["misses"] += 1
                                         self.sound.play('eliminate')
-                                        print(f"❌ Player {p_id} Missed! Total misses: {data['misses']}")
                                 else:
-                                    if ch == p_id and led in (5, 6):
+                                    if ch == p_id and led == 6:
                                         self.round_winner = p_id
                                         data["round_wins"] += 1
                                         self.sound.play('win')
-                                        print(f"🎉 PLAYER {p_id} WINS ROUND {self.current_round}!")
+                                        self.round_history.append(f"Runda {self.current_round}: Jucătorul {p_id}")
                                         self.state = "ROUND_WIN_ANIM"
                                         self.anim_timer = time.time()
                     
@@ -393,16 +350,13 @@ class NetworkManager:
         self.game = game
         self.running = True
         self.sequence_number = 0
-        
         self.target_ip = run_discovery_flow()
-            
         self.sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock_recv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             self.sock_recv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.sock_recv.bind(("0.0.0.0", UDP_LISTEN_PORT))
-        except Exception as e:
-            print(f"Error binding recv socket: {e}")
+        except:
             self.running = False
 
     def send_loop(self):
@@ -414,11 +368,7 @@ class NetworkManager:
     def build_packet(self, cmd_h, cmd_l, payload=b""):
         internal = bytearray([0x02, 0x00, 0x00, cmd_h, cmd_l]) + payload
         length = len(internal) - 1
-        
-        rand1 = random.randint(0, 127)
-        rand2 = random.randint(0, 127)
-        header = bytearray([0x75, rand1, rand2, (length >> 8) & 0xFF, length & 0xFF])
-        
+        header = bytearray([0x75, random.randint(0, 127), random.randint(0, 127), (length >> 8) & 0xFF, length & 0xFF])
         pkt = header + internal
         pkt.append(calculate_checksum(pkt))
         return pkt
@@ -429,24 +379,16 @@ class NetworkManager:
         seq_h, seq_l = (self.sequence_number >> 8) & 0xFF, self.sequence_number & 0xFF
         
         p1 = self.build_packet(0x33, 0x44, bytearray([seq_h, seq_l, 0x00, 0x00, 0x00]))
-        
-        fff0_payload = bytearray()
-        for _ in range(4): fff0_payload += bytes([0x00, 11])
-        p2 = self.build_packet(0xFF, 0xF0, fff0_payload)
-        
-        data_payload = bytearray([0x00, 0x01, (len(frame_data) >> 8) & 0xFF, len(frame_data) & 0xFF]) + frame_data
-        p3 = self.build_packet(0x88, 0x77, data_payload)
-        
+        p2 = self.build_packet(0xFF, 0xF0, bytes([0x00, 11] * 4))
+        p3 = self.build_packet(0x88, 0x77, bytearray([0x00, 0x01, (len(frame_data) >> 8) & 0xFF, len(frame_data) & 0xFF]) + frame_data)
         p4 = self.build_packet(0x55, 0x66, bytearray([seq_h, seq_l, 0x00, 0x00, 0x00]))
         
         try:
             target = (self.target_ip, UDP_SEND_PORT)
-            self.sock_send.sendto(p1, target); time.sleep(0.008)
-            self.sock_send.sendto(p2, target); time.sleep(0.008)
-            self.sock_send.sendto(p3, target); time.sleep(0.008)
-            self.sock_send.sendto(p4, target); time.sleep(0.008) 
-        except:
-            pass
+            for p in [p1, p2, p3, p4]:
+                self.sock_send.sendto(p, target)
+                time.sleep(0.008)
+        except: pass
 
     def recv_loop(self):
         while self.running:
@@ -457,21 +399,125 @@ class NetworkManager:
                         for ch in range(1, 5):
                             base = 2 + (ch - 1) * 171
                             for led in range(11):
-                                is_pressed = (data[base + 1 + led] == 0xCC)
-                                self.game.button_states[(ch, led)] = is_pressed
-            except:
-                pass
+                                self.game.button_states[(ch, led)] = (data[base + 1 + led] == 0xCC)
+            except: pass
 
     def start_bg(self):
-        t1 = threading.Thread(target=self.send_loop, daemon=True)
-        t2 = threading.Thread(target=self.recv_loop, daemon=True)
-        t1.start()
-        t2.start()
+        threading.Thread(target=self.send_loop, daemon=True).start()
+        threading.Thread(target=self.recv_loop, daemon=True).start()
 
 def game_thread_func(game):
     while game.running:
         game.tick()
         time.sleep(0.01)
+
+# --- Graphical User Interfaces ---
+def build_gui(game, net):
+    # Fereastra 1: Control (Game Master)
+    root = tk.Tk()
+    root.title("Control Panel - Scavenger Hunt")
+    root.geometry("600x500")
+    root.configure(bg="#1e1e2e")
+    root.resizable(False, False)
+
+    # Fereastra 2: Ecranul Jucătorilor (Camera)
+    player_screen = tk.Toplevel(root)
+    player_screen.title("Ecran Cameră Jucători")
+    player_screen.geometry("1000x600")
+    player_screen.configure(bg="#11111b")
+
+    # Fonturi
+    title_font = tkfont.Font(family="Helvetica", size=24, weight="bold")
+    body_font = tkfont.Font(family="Helvetica", size=14)
+    btn_font = tkfont.Font(family="Helvetica", size=16, weight="bold")
+    
+    # --- UI Ecran Control (Root) ---
+    tk.Label(root, text="Scavenger Hunt Control", font=title_font, bg="#1e1e2e", fg="#cdd6f4").pack(pady=(20, 10))
+
+    frame_btns = tk.Frame(root, bg="#1e1e2e")
+    frame_btns.pack(pady=20)
+
+    def start_match(num):
+        game.start_game(num)
+
+    tk.Button(frame_btns, text="2 Players", font=btn_font, bg="#89b4fa", fg="#1e1e2e", activebackground="#b4befe", width=10, command=lambda: start_match(2)).grid(row=0, column=0, padx=10, pady=10)
+    tk.Button(frame_btns, text="3 Players", font=btn_font, bg="#f9e2af", fg="#1e1e2e", activebackground="#f5e0dc", width=10, command=lambda: start_match(3)).grid(row=0, column=1, padx=10, pady=10)
+    tk.Button(frame_btns, text="4 Players", font=btn_font, bg="#f38ba8", fg="#1e1e2e", activebackground="#f5c2e7", width=10, command=lambda: start_match(4)).grid(row=0, column=2, padx=10, pady=10)
+
+    frame_winners = tk.Frame(root, bg="#1e1e2e")
+    frame_winners.pack(pady=10)
+    tk.Label(frame_winners, text="Istoric Rânde (GM View):", font=btn_font, bg="#1e1e2e", fg="#cdd6f4").pack()
+    lbl_control_winners = tk.Label(frame_winners, text="Așteptăm startul...", font=body_font, bg="#1e1e2e", fg="#bac2de")
+    lbl_control_winners.pack(pady=10)
+
+    def quit_server():
+        game.running = False
+        net.running = False
+        root.destroy()
+
+    tk.Button(root, text="Oprește Jocul", font=tkfont.Font(family="Helvetica", size=12, weight="bold"), bg="#313244", fg="#f38ba8", width=15, command=quit_server).pack(side="bottom", pady=20)
+    root.protocol("WM_DELETE_WINDOW", quit_server)
+    player_screen.protocol("WM_DELETE_WINDOW", quit_server)
+
+    # --- UI Ecran Jucători (Player Screen) ---
+    player_title_font = tkfont.Font(family="Helvetica", size=48, weight="bold")
+    player_inst_font = tkfont.Font(family="Helvetica", size=32)
+    player_data_font = tkfont.Font(family="Helvetica", size=24)
+
+    lbl_player_status = tk.Label(player_screen, text="Așteptăm Jucătorii", font=player_title_font, bg="#11111b", fg="#cdd6f4", wraplength=900, justify="center")
+    lbl_player_status.pack(pady=(80, 20), expand=True)
+
+    lbl_player_inst = tk.Label(player_screen, text="", font=player_inst_font, bg="#11111b", fg="#a6adc8", wraplength=900, justify="center")
+    lbl_player_inst.pack(pady=20, expand=True)
+
+    lbl_player_stats = tk.Label(player_screen, text="", font=player_data_font, bg="#11111b", fg="#f38ba8", justify="center")
+    lbl_player_stats.pack(pady=20, expand=True)
+
+    # --- Funcția de Polling ---
+    def update_gui():
+        with game.lock:
+            # Update Control Panel
+            if game.state == "LOBBY":
+                lbl_control_winners.config(text="În lobby.")
+            elif not game.round_history and game.state != "LOBBY":
+                lbl_control_winners.config(text="Runda 1 în desfășurare...")
+            else:
+                lbl_control_winners.config(text=" | ".join(game.round_history))
+
+            # Update Player Screen
+            lbl_player_stats.config(text="") # Curățăm stats by default
+            
+            if game.state == "LOBBY":
+                lbl_player_status.config(text="SCAVENGER HUNT", fg="#cdd6f4")
+                lbl_player_inst.config(text="Jocul va începe curând.\nAșteptați instrucțiunile Game Master-ului.")
+                
+            elif game.state == "WAITING_START":
+                lbl_player_status.config(text=f"RUNDA {game.current_round}", fg="#f9e2af")
+                lbl_player_inst.config(text="Mergeți la zidul vostru și țineți apăsat\nTILE 6 (Butonul Central) pentru a începe!")
+                
+            elif game.state == "ACTIVE":
+                lbl_player_status.config(text="CĂUTAȚI-VĂ CULOAREA!", fg="#89b4fa")
+                lbl_player_inst.config(text="Loviți de 5 ori, apoi întoarceți-vă rapid\nla TILE 6 pentru a câștiga runda!")
+                
+            elif game.state == "ROUND_WIN_ANIM":
+                lbl_player_status.config(text=f"RUNDA CÂȘTIGATĂ!", fg="#a6e3a1")
+                lbl_player_inst.config(text=f"Jucătorul {game.round_winner} a fost cel mai rapid!")
+                
+            elif game.state == "GAME_OVER":
+                lbl_player_status.config(text="JOC TERMINAT!", fg="#f38ba8")
+                winners_str = ", ".join([str(w) for w in game.overall_winners])
+                lbl_player_inst.config(text=f"Câștigător Final: Jucătorul {winners_str}!")
+                
+                # Afișăm Scorurile și Ratările la final
+                stats_text = "Statistici Finale:\n\n"
+                for p, d in game.players.items():
+                    stats_text += f"Jucătorul {p}: {d['round_wins']} Runde Câștigate | {d['misses']} Ratări\n"
+                lbl_player_stats.config(text=stats_text)
+
+        root.after(200, update_gui)
+
+    update_gui()
+    root.mainloop()
 
 # --- Execution ---
 if __name__ == "__main__":
@@ -482,28 +528,5 @@ if __name__ == "__main__":
     gt = threading.Thread(target=game_thread_func, args=(game,), daemon=True)
     gt.start()
     
-    print("\n🏃 Scavenger Hunt Console Server Running.")
-    print("Commands: 'start <num_players>' (max 4), 'quit'")
-    
-    try:
-        while game.running:
-            cmd = input("> ").strip().lower()
-            if cmd in ['quit', 'exit']:
-                game.running = False
-                break
-            elif cmd.startswith('start'):
-                try:
-                    num = int(cmd.split()[1])
-                    if 2 <= num <= 4:
-                        game.start_game(num)
-                    else:
-                        print("Please enter a number between 2 and 4.")
-                except:
-                    print("Usage: start <num_players>")
-            else:
-                 print("Unknown command.")
-    except KeyboardInterrupt:
-        game.running = False
-
-    net.running = False
+    build_gui(game, net)
     print("Exiting...")
