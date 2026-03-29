@@ -33,11 +33,17 @@ LIGHT_GRAY = (200, 200, 200)
 TILE_COLS_M1 = [2, 5, 9, 12]
 TILE_COLS_M2 = [6, 7, 8, 9] 
 
-# Zone de hit - Pentru iertare pe axa Y
 HIT_ZONE_BOTTOM_COOP = (16, 31) 
 HIT_ZONE_BOTTOM = (22, 31)      
 HIT_ZONE_TOP    = (0, 9)        
 FLASH_DURATION  = 0.20
+
+# Pixel Art pentru Countdown
+DIGITS = {
+    3: [(0,0), (1,0), (2,0), (2,1), (1,2), (2,2), (2,3), (0,4), (1,4), (2,4)],
+    2: [(0,0), (1,0), (2,0), (2,1), (1,2), (0,2), (0,3), (0,4), (1,4), (2,4)],
+    1: [(1,0), (1,1), (1,2), (1,3), (1,4), (0,1)]
+}
 
 class PianoTilesEngine:
     def __init__(self):
@@ -118,7 +124,7 @@ class PianoTilesEngine:
                 channel, local = i // 64, i % 64
                 row, col_raw = local // 16, local % 16
                 x = col_raw if row % 2 == 0 else 15 - col_raw
-                y = (channel * 4) + row # <-- Am adăugat calculul pentru axa Y
+                y = (channel * 4) + row
                 
                 target_col_idx = None
                 
@@ -137,7 +143,6 @@ class PianoTilesEngine:
                                 break
                             
                 if target_col_idx is not None:
-                    # Pasăm și Y-ul către funcția de validare
                     self._try_hit(target_col_idx, t, y) 
                     
         self.prev_button_states = list(self.button_states)
@@ -148,7 +153,6 @@ class PianoTilesEngine:
         best_d  = None; min_diff_d = 999
         best_u  = None; min_diff_u = 999
 
-        # Împărțim podeaua fizică în două teritorii
         is_top_half = (press_y < 16)
         is_bottom_half = (press_y >= 16)
 
@@ -159,9 +163,8 @@ class PianoTilesEngine:
 
             if self.mode == '1':
                 if time_diff > 0.6: continue 
-                # În Co-op vrem ca jucătorii să calce doar în jumătatea de jos
                 if is_bottom_half and tile_id not in self.hit_tiles[col]:
-                    py = int(25 - (target_time - song_time) * self.speed)
+                    py = int(32 - (target_time - song_time) * self.speed)
                     if HIT_ZONE_BOTTOM_COOP[0] <= py <= HIT_ZONE_BOTTOM_COOP[1]:
                         if time_diff < min_diff_1:
                             min_diff_1 = time_diff; best_t1 = tile_id
@@ -169,7 +172,6 @@ class PianoTilesEngine:
             elif self.mode == '2':
                 if time_diff > 0.4: continue 
                 
-                # P2 (JOS) - Verificăm doar dacă fizic s-a călcat jos
                 if is_bottom_half:
                     uid_d = f"d_{tile_id}"
                     if uid_d not in self.hit_tiles[col]:
@@ -178,7 +180,6 @@ class PianoTilesEngine:
                             if time_diff < min_diff_d:
                                 min_diff_d = time_diff; best_d = tile_id
                                 
-                # P1 (SUS) - Verificăm doar dacă fizic s-a călcat sus
                 if is_top_half:
                     uid_u = f"u_{tile_id}"
                     if uid_u not in self.hit_tiles[col]:
@@ -229,6 +230,13 @@ class PianoTilesEngine:
                     if uid_u not in self.hit_tiles[col] and uid_u not in self.miss_tiles[col]:
                         self.miss_tiles[col].add(uid_u); self.misses_p1 += 1
 
+    def draw_digit(self, buffer, digit, offset_x, offset_y, color, scale=2):
+        if digit in DIGITS:
+            for dx, dy in DIGITS[digit]:
+                for sx in range(scale):
+                    for sy in range(scale):
+                        self.set_pixel(buffer, offset_x + (dx * scale) + sx, offset_y + (dy * scale) + sy, *color)
+
     def render(self):
         buffer = bytearray(FRAME_DATA_LENGTH)
         t = time.time()
@@ -253,7 +261,15 @@ class PianoTilesEngine:
             return buffer
 
         if self.mode and self.is_pulsing:
-            if t - self.start_time > 5.0: 
+            elapsed = t - self.start_time
+            
+            # --- NUMĂRĂTOAREA INVERSĂ (5 secunde total) ---
+            # 0-2 secunde: Pulsul mov de pregătire
+            # 2-3 secunde: "3"
+            # 3-4 secunde: "2"
+            # 4-5 secunde: "1"
+            
+            if elapsed > 5.0: 
                 self.is_pulsing = False
                 self.start_time = time.time() 
                 
@@ -264,6 +280,30 @@ class PianoTilesEngine:
                             pygame.mixer.music.play()
                             self.music_playing = True
                     except Exception: pass
+                    
+            # Randăm matricea neagră ca bază pentru countdown
+            for y in range(HEIGHT):
+                for x in range(WIDTH):
+                    self.set_pixel(buffer, x, y, *BLACK)
+                    
+            if elapsed < 2.0:
+                # Arată frame-ul mov care pulsează
+                for y in range(HEIGHT):
+                    for x in range(WIDTH):
+                        is_frame = (y < 2 or y >= HEIGHT - 2)
+                        if self.mode == '2' and (y == 15 or y == 16): is_frame = True
+                        if is_frame:
+                            f = 0.7 + 0.3 * math.sin(t * 12)
+                            c = tuple(int(ch*f) for ch in PURPLE)
+                            self.set_pixel(buffer, x, y, c[0], c[1], c[2])
+            elif 2.0 <= elapsed < 3.0:
+                self.draw_digit(buffer, 3, 5, 11, WHITE, scale=2)
+            elif 3.0 <= elapsed < 4.0:
+                self.draw_digit(buffer, 2, 5, 11, WHITE, scale=2)
+            elif 4.0 <= elapsed < 5.0:
+                self.draw_digit(buffer, 1, 5, 11, WHITE, scale=2)
+                
+            return buffer
 
         for y in range(HEIGHT):
             for x in range(WIDTH):
@@ -274,15 +314,7 @@ class PianoTilesEngine:
                 is_frame = (y < 2 or y >= HEIGHT - 2)
                 if self.mode == '2' and (y == 15 or y == 16): is_frame = True
                 if is_frame:
-                    c = PURPLE
-                    if self.is_pulsing:
-                        f = 0.7 + 0.3 * math.sin(t * 12)
-                        c = tuple(int(ch*f) for ch in PURPLE)
-                    self.set_pixel(buffer, x, y, c[0], c[1], c[2])
-                    continue
-
-                if self.is_pulsing: 
-                    self.set_pixel(buffer, x, y, *BLACK)
+                    self.set_pixel(buffer, x, y, PURPLE[0], PURPLE[1], PURPLE[2])
                     continue
 
                 self.set_pixel(buffer, x, y, *BLACK)
@@ -511,13 +543,13 @@ class VisualInterface:
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_1:
                         self.game.mode = '1'
-                        self.game.speed = 7      # Viteza lentă pentru Co-op
+                        self.game.speed = 7      
                         self.game.is_pulsing = True
                         self.game._reset_state()
                         self.game.start_time = time.time()
                     elif event.key == pygame.K_2:
                         self.game.mode = '2'
-                        self.game.speed = 12     # Redus de la 18 pentru a fi mai accesibil fizic
+                        self.game.speed = 12     
                         self.game.is_pulsing = True
                         self.game._reset_state()
                         self.game.start_time = time.time()
