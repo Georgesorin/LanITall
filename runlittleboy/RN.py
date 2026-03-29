@@ -5,6 +5,8 @@ import random
 import math
 import psutil
 import os
+import wave
+import struct
 
 try:
     import pygame
@@ -41,6 +43,92 @@ WALL_COLORS = {
 def calculate_checksum(data: bytearray) -> int:
     idx = sum(data) & 0xFF
     return PASSWORD_ARRAY[idx]
+
+# --- SFX Generation Logic ---
+
+def synthesize_laser(filename, start_freq, end_freq, duration, wave_type='square', volume=0.3):
+    sample_rate = 44100
+    num_samples = int(sample_rate * duration)
+    
+    os.makedirs('_sfx', exist_ok=True)
+    
+    with wave.open(filename, 'w') as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        
+        phase = 0.0
+        for i in range(num_samples):
+            t = i / sample_rate
+            freq = start_freq * ((end_freq / start_freq) ** (t / duration))
+            phase += 2 * math.pi * freq / sample_rate
+            
+            if wave_type == 'square':
+                sample = 1.0 if math.sin(phase) > 0 else -1.0
+            elif wave_type == 'sawtooth':
+                sample = 2.0 * (phase / (2 * math.pi) - math.floor(phase / (2 * math.pi) + 0.5))
+            else: 
+                sample = math.sin(phase)
+            
+            envelope = max(0.0, 1.0 - (t / duration))
+            audio_val = int(sample * envelope * volume * 32767)
+            audio_val = max(-32768, min(32767, audio_val))
+            
+            wav_file.writeframes(struct.pack('<h', audio_val))
+
+def generate_all_sfx():
+    print("Forging lightsabers and loading blasters... (Generating Sci-Fi SFX)")
+    synthesize_laser('_sfx/blaster_0.wav', 2000, 200, 0.25, 'square')
+    synthesize_laser('_sfx/blaster_1.wav', 2200, 250, 0.25, 'square')
+    synthesize_laser('_sfx/blaster_2.wav', 1800, 150, 0.30, 'square')
+    synthesize_laser('_sfx/blaster_3.wav', 2500, 300, 0.20, 'square')
+    synthesize_laser('_sfx/blaster_4.wav', 1500, 100, 0.35, 'square')
+    synthesize_laser('_sfx/success.wav', 400, 1200, 0.4, 'sine')
+    synthesize_laser('_sfx/eliminate.wav', 300, 50, 0.6, 'sawtooth')
+    synthesize_laser('_sfx/win.wav', 800, 2000, 1.5, 'sine')
+    print("Sci-Fi SFX Generation Complete!")
+
+class SoundManager:
+    def __init__(self):
+        self.enabled = False
+        try:
+            if PYGAME_AVAILABLE:
+                pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
+                self.enabled = True
+                self.sounds = {}
+                self._load_sounds()
+            else:
+                print("Pygame module not found. Audio disabled.")
+        except Exception as e:
+            print(f"Audio init failed: {e}")
+            self.enabled = False
+
+    def _load_sounds(self):
+        if not os.path.exists("_sfx/blaster_0.wav"):
+            generate_all_sfx()
+
+        sfx_files = {
+            'animal_0': '_sfx/blaster_0.wav',
+            'animal_1': '_sfx/blaster_1.wav',
+            'animal_2': '_sfx/blaster_2.wav',
+            'animal_3': '_sfx/blaster_3.wav',
+            'animal_4': '_sfx/blaster_4.wav',
+            'success': '_sfx/success.wav',
+            'eliminate': '_sfx/eliminate.wav',
+            'win': '_sfx/win.wav',
+        }
+        
+        for name, path in sfx_files.items():
+            if os.path.exists(path):
+                try: self.sounds[name] = pygame.mixer.Sound(path)
+                except: print(f"Failed to load {path}")
+            else: print(f"Warning: Missing SFX {path}")
+
+    def play(self, name):
+        if not self.enabled: return
+        if name in self.sounds:
+            try: self.sounds[name].play()
+            except: pass
 
 # --- Discovery Flow ---
 
@@ -120,6 +208,7 @@ class ScavengerHunt:
     def __init__(self):
         self.running = True
         self.lock = threading.RLock()
+        self.sound = SoundManager()
         
         # Extended Game States
         self.state = "LOBBY" # LOBBY, WAITING_START, ACTIVE, ROUND_WIN_ANIM, GAME_OVER
@@ -130,7 +219,7 @@ class ScavengerHunt:
         self.overall_winners = []
         self.anim_timer = 0
         
-        self.players = {} # {id: {"score": 0, "misses": 0, "round_wins": 0, "target": (w, l), "finished": False}}
+        self.players = {} 
         
         self.button_states = {(ch, led): False for ch in range(1, 5) for led in range(11)}
         self.prev_states = {(ch, led): False for ch in range(1, 5) for led in range(11)}
@@ -140,7 +229,6 @@ class ScavengerHunt:
         with self.lock:
             self.num_players = count
             self.current_round = 1
-            # Initialize stats, including misses and round_wins
             self.players = {i: {"score": 0, "misses": 0, "round_wins": 0, "target": None, "finished": False} for i in range(1, count + 1)}
             self.state = "WAITING_START"
             
@@ -148,7 +236,6 @@ class ScavengerHunt:
             print(f"👉 Round {self.current_round}: Press and hold TILE 5 on ALL active walls to start!")
 
     def _spawn_target(self, p_id):
-        # Target appears on any wall EXCEPT the player's home wall
         other_walls = [w for w in range(1, 5) if w != p_id]
         self.players[p_id]["target"] = (random.choice(other_walls), random.randint(1, 10))
 
@@ -166,13 +253,12 @@ class ScavengerHunt:
             if self.state == "WAITING_START":
                 pulse = int(127 + 127 * math.sin(now * 10))
                 for p_id in self.players:
-                    self.active_leds[(p_id, 0)] = (pulse, pulse, pulse) # Pulse eyes white
+                    self.active_leds[(p_id, 0)] = (pulse, pulse, pulse) 
                 
-                # Check if Tile 5 is pressed on ALL active player walls to start the round
                 if all(self.button_states[(p, 5)] for p in self.players):
                     print(f"🚀 ROUND {self.current_round} START!")
+                    self.sound.play('success')
                     self.state = "ACTIVE"
-                    # Reset round-specific variables
                     for p_id in self.players: 
                         self.players[p_id]["score"] = 0
                         self.players[p_id]["finished"] = False
@@ -181,13 +267,12 @@ class ScavengerHunt:
             elif self.state == "ACTIVE":
                 for p_id, data in self.players.items():
                     color = WALL_COLORS[p_id]
-                    self.active_leds[(p_id, 0)] = color # Eye shows player's color
+                    self.active_leds[(p_id, 0)] = color 
                     
                     if not data["finished"]:
                         t_w, t_l = data["target"]
-                        self.active_leds[(t_w, t_l)] = color # Target is player's color
+                        self.active_leds[(t_w, t_l)] = color 
                     else:
-                        # Home phase: pulse 5 & 6 to signal return
                         flash = color if int(now * 5) % 2 == 0 else (0, 0, 0)
                         self.active_leds[(p_id, 5)] = flash
                         self.active_leds[(p_id, 6)] = flash
@@ -195,12 +280,10 @@ class ScavengerHunt:
             elif self.state == "ROUND_WIN_ANIM":
                 elapsed = now - self.anim_timer
                 if elapsed < 3.0:
-                    # Blink the round winner's wall rapidly
                     blink = WALL_COLORS[self.round_winner] if int(now * 10) % 2 == 0 else (0,0,0)
                     for led in range(11): 
                         self.active_leds[(self.round_winner, led)] = blink
                         
-                    # Soft pulse the other eyes
                     pulse = int(50 + 50 * math.sin(now * 5))
                     for p in self.players:
                         if p != self.round_winner:
@@ -216,13 +299,13 @@ class ScavengerHunt:
                         best_score = max(p["round_wins"] for p in self.players.values())
                         self.overall_winners = [p for p, data in self.players.items() if data["round_wins"] == best_score]
                         
+                        self.sound.play('win')
                         print("\n🏁 MATCH COMPLETE!")
                         for p, d in self.players.items():
                             print(f"  Player {p} -> {d['round_wins']} Round Wins | {d['misses']} Misses")
                         print(f"🏆 Overall Winner(s): {self.overall_winners}")
 
             elif self.state == "GAME_OVER":
-                # Big rainbow animation for the overall winner(s)
                 rainbow = (int(127+127*math.sin(now)), int(127+127*math.sin(now+2)), int(127+127*math.sin(now+4)))
                 for win_id in self.overall_winners:
                     for led in range(11):
@@ -241,24 +324,25 @@ class ScavengerHunt:
                         if self.state == "ACTIVE":
                             for p_id, data in self.players.items():
                                 if not data["finished"]:
-                                    # Hit the exact target
                                     if (ch, led) == data["target"]:
                                         data["score"] += 1
+                                        self.sound.play(f'animal_{random.randint(0, 4)}')
                                         print(f"👤 Player {p_id}: {data['score']}/5 caught!")
                                         if data["score"] >= 5:
                                             data["finished"] = True
+                                            self.sound.play('success')
                                             print(f"🏃 Player {p_id} FINISHED! Run back to Wall {p_id}!")
                                         else:
                                             self._spawn_target(p_id)
-                                    # Hit a tile on the target wall, but it's the wrong one (Miss)
                                     elif ch == data["target"][0]:
                                         data["misses"] += 1
+                                        self.sound.play('eliminate')
                                         print(f"❌ Player {p_id} Missed! Total misses: {data['misses']}")
                                 else:
-                                    # Win by hitting home base (Tile 5 or 6 on YOUR wall)
                                     if ch == p_id and led in (5, 6):
                                         self.round_winner = p_id
                                         data["round_wins"] += 1
+                                        self.sound.play('win')
                                         print(f"🎉 PLAYER {p_id} WINS ROUND {self.current_round}!")
                                         self.state = "ROUND_WIN_ANIM"
                                         self.anim_timer = time.time()
