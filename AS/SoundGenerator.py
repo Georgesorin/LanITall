@@ -32,14 +32,7 @@ def generate_tone(freq, duration, vol=0.5, type='sine', slide=0):
 def generate_all():
     if not os.path.exists(SFX_DIR): os.makedirs(SFX_DIR)
 
-    # 5 Distinct "Animal" Sounds
-    save_wav("animal_0.wav", generate_tone(800, 0.2, vol=0.3, type='sine', slide=500))  # Bird Chirp
-    save_wav("animal_1.wav", generate_tone(150, 0.3, vol=0.4, type='square', slide=50)) # Frog Croak
-    save_wav("animal_2.wav", generate_tone(100, 0.4, vol=0.4, type='saw', slide=-20))   # Cow Moo
-    save_wav("animal_3.wav", generate_tone(400, 0.2, vol=0.3, type='square', slide=-200)) # Dog Bark
-    save_wav("animal_4.wav", generate_tone(1200, 0.1, vol=0.2, type='noise'))           # Cricket
-
-    # Game States
+    # Game States ONLY (No more fake animals!)
     save_wav("success.wav", generate_tone(600, 0.3, vol=0.2, type='sine', slide=400))
     save_wav("eliminate.wav", generate_tone(200, 0.8, vol=0.5, type='saw', slide=-400))
     
@@ -51,4 +44,4 @@ def generate_all():
 
 if __name__ == "__main__":
     generate_all()
-    print("Animal sounds generated successfully!")
+    print("Game state sounds generated successfully! Make sure to put your animal_0.wav to animal_4.wav in the _sfx folder.")

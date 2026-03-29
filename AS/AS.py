@@ -5,6 +5,8 @@ import random
 import math
 import psutil
 import os
+import tkinter as tk
+from tkinter import ttk
 
 try:
     import pygame
@@ -42,7 +44,6 @@ def calculate_checksum(data: bytearray) -> int:
 # --- Network Discovery Flow ---
 
 def get_local_interfaces():
-    """Identifies active network interfaces for discovery."""
     interfaces = []
     for iface_name, addrs in psutil.net_if_addrs().items():
         for addr in addrs:
@@ -130,8 +131,8 @@ class SoundManager:
             self.enabled = False
 
     def _load_sounds(self):
-        if not os.path.exists("_sfx/animal_0.wav"):
-            print("Generating Animal SFX...")
+        if not os.path.exists("_sfx/success.wav"):
+            print("Generating Game State SFX...")
             SoundGenerator.generate_all()
 
         sfx_files = {
@@ -149,7 +150,8 @@ class SoundManager:
             if os.path.exists(path):
                 try: self.sounds[name] = pygame.mixer.Sound(path)
                 except: print(f"Failed to load {path}")
-            else: print(f"Warning: Missing SFX {path}")
+            else: 
+                print(f"Warning: Missing SFX {path}. Did you put your animal sounds in the _sfx folder?")
 
     def play(self, name):
         if not self.enabled: return
@@ -167,9 +169,9 @@ class AnimalSoundsGame:
         
         self.sound = SoundManager()
         
-        # --- Game States ---
-        # LOBBY, INTRO_SEQUENCE, SHOWING_SEQUENCE, WAITING_INPUT, ROUND_SUCCESS, WINNER, GAMEOVER
+        # --- NEW STATE ADDED: WAITING_READY ---
         self.state = "LOBBY" 
+        self.difficulty = "EASY" 
         
         self.active_players = {} 
         self.started_with = 0
@@ -179,12 +181,10 @@ class AnimalSoundsGame:
         self.show_timer = 0
         self.played_step_sound = False
         
-        # 4 Walls, 11 LEDs per wall (Index 0 is the Eye, 1-10 are buttons)
         self.button_states = {(ch, led): False for ch in range(1, 5) for led in range(11)}
         self.prev_states = {(ch, led): False for ch in range(1, 5) for led in range(11)}
         self.active_leds = {}
         
-        # 5 distinct colors for the 5 buttons
         self.COLORS = [
             (255, 0, 0),   # 0 - Red
             (0, 255, 0),   # 1 - Green
@@ -198,45 +198,93 @@ class AnimalSoundsGame:
         with self.lock:
             self.active_leds.clear()
 
-            if self.state in ["LOBBY", "WINNER", "GAMEOVER"]:
+            # --- 1. Base Layer (Background States) ---
+            if self.state != "LOBBY":
+                for pid in range(8):
+                    wall = (pid // 2) + 1
+                    is_left = (pid % 2 == 0)
+                    leds = range(1, 6) if is_left else range(6, 11)
+
+                    if pid >= self.started_with:
+                        # UNUSED: Solid Yellow
+                        for led in leds: 
+                            self.active_leds[(wall, led)] = (128, 128, 0)
+                            
+                    elif pid not in self.active_players:
+                        # ELIMINATED: Pulsing Red
+                        pulse = int(127 + 127 * math.sin(now * 5))
+                        for led in leds: 
+                            self.active_leds[(wall, led)] = (pulse, 0, 0)
+                            
+                    elif self.state == "WINNER":
+                        # WINNER: Waving Rainbow
+                        for led in leds:
+                            r = int(127 + 127 * math.sin(now * 4 + led * 0.5))
+                            g = int(127 + 127 * math.sin(now * 4 + led * 0.5 + 2))
+                            b = int(127 + 127 * math.sin(now * 4 + led * 0.5 + 4))
+                            self.active_leds[(wall, led)] = (r, g, b)
+
+            # --- 2. The Eye Logic (Index 0) ---
+            if self.state in ["LOBBY", "GAMEOVER"]:
                 pulse = int(127 + 127 * math.sin(now * 3))
-                color = (0, 255, 0) if self.state == "WINNER" else (pulse, 0, 0)
-                for ch in range(1, 5): self.active_leds[(ch, 0)] = color # Eye is at index 0
+                for ch in range(1, 5): self.active_leds[(ch, 0)] = (pulse, 0, 0)
+            elif self.state in ["WINNER", "ROUND_SUCCESS", "WAITING_READY"]:
+                # Solid Green while waiting to show system is active
+                for ch in range(1, 5): self.active_leds[(ch, 0)] = (0, 255, 0)
+
+            # Early Exits for static states
+            if self.state in ["LOBBY", "WINNER", "GAMEOVER"]:
+                self.process_inputs()
+                return
+
+            # --- 3. Active Game Logic ---
+            
+            # --- NEW: Waiting for players to hit the Green Ready Button ---
+            if self.state == "WAITING_READY":
+                for pid, p in self.active_players.items():
+                    # The middle button is index 3 for the left player, index 8 for right player
+                    ready_led = 3 if p['side'] == 'left' else 8
+                    
+                    if p['ready']:
+                        # Pulse Cyan when locked in
+                        pulse = int(127 + 127 * math.sin(now * 6))
+                        self.active_leds[(p['wall'], ready_led)] = (0, pulse, pulse)
+                    else:
+                        # Solid Green indicating they need to press it
+                        self.active_leds[(p['wall'], ready_led)] = (0, 255, 0)
+                
+                self.process_inputs()
+                return
+
+            if self.state == "ROUND_SUCCESS":
+                if now - self.show_timer > 1.5:
+                    self.state = "SHOWING_SEQUENCE"
+                    self.show_index = 0
+                    self.show_timer = now
+                    self.played_step_sound = False
+                self.process_inputs()
                 return
 
             if self.state == "INTRO_SEQUENCE":
-                # Show each animal sound to the players for 1 second each
-                if now - self.show_timer > 1.0:
+                if now - self.show_timer > 2.5:
                     self.show_index += 1
                     self.show_timer = now
                     self.played_step_sound = False
 
-                if self.show_index < 5:
-                    val = self.show_index
+                if self.show_index < 10:
+                    val = self.show_index % 5 
                     if not self.played_step_sound:
                         self.sound.play(f'animal_{val}')
                         self.played_step_sound = True
                     
                     for pid, p in self.active_players.items():
-                        # Left side uses 1-5, Right side uses 6-10
                         led_idx = val + 1 if p['side'] == 'left' else val + 6
                         self.active_leds[(p['wall'], led_idx)] = self.COLORS[val]
                 else:
-                    # Intro finished, start the actual game sequence
                     self.sequence = [random.randint(0, 4)]
                     self.state = "SHOWING_SEQUENCE"
                     self.show_index = 0
                     self.show_timer = time.time()
-                    self.played_step_sound = False
-                return
-
-            if self.state == "ROUND_SUCCESS":
-                for ch in range(1, 5): self.active_leds[(ch, 0)] = (0, 255, 0)
-                
-                if now - self.show_timer > 1.5:
-                    self.state = "SHOWING_SEQUENCE"
-                    self.show_index = 0
-                    self.show_timer = now
                     self.played_step_sound = False
                 return
 
@@ -255,11 +303,13 @@ class AnimalSoundsGame:
                         if not self.played_step_sound:
                             self.sound.play(f'animal_{val}')
                             self.played_step_sound = True
-                            
-                        col = self.COLORS[val]
-                        for pid, p in self.active_players.items():
-                            led_idx = val + 1 if p['side'] == 'left' else val + 6
-                            self.active_leds[(p['wall'], led_idx)] = col
+                        
+                        if self.difficulty == "EASY":
+                            col = self.COLORS[val]
+                            for pid, p in self.active_players.items():
+                                led_idx = val + 1 if p['side'] == 'left' else val + 6
+                                self.active_leds[(p['wall'], led_idx)] = col
+                                
                 else:
                     self.state = "WAITING_INPUT"
                     for p in self.active_players.values():
@@ -269,11 +319,15 @@ class AnimalSoundsGame:
             elif self.state == "WAITING_INPUT":
                 for ch in range(1, 5):
                     for led in range(11):
-                        if led == 0: continue # Ignore the Eye
+                        if led == 0: continue 
                         if self.button_states[(ch, led)]:
                             side = 'left' if led <= 5 else 'right'
                             val = led - 1 if side == 'left' else led - 6
-                            self.active_leds[(ch, led)] = self.COLORS[val]
+                            pid = (ch - 1) * 2 + (0 if side == 'left' else 1)
+                            
+                            # Only overwrite the base layer if the player is still active!
+                            if pid in self.active_players:
+                                self.active_leds[(ch, led)] = self.COLORS[val]
                             
         self.process_inputs()
 
@@ -288,7 +342,6 @@ class AnimalSoundsGame:
                     self.prev_states[(ch, led)] = is_pressed
 
     def handle_new_step(self, ch, led):
-        if self.state != "WAITING_INPUT": return
         if led == 0: return 
 
         side = 'left' if led <= 5 else 'right'
@@ -296,8 +349,28 @@ class AnimalSoundsGame:
         pid = (ch - 1) * 2 + (0 if side == 'left' else 1)
 
         if pid not in self.active_players: return 
-        
         p = self.active_players[pid]
+
+        # --- Handle the Ready Phase Input ---
+        if self.state == "WAITING_READY":
+            ready_led = 3 if p['side'] == 'left' else 8
+            if led == ready_led and not p['ready']:
+                p['ready'] = True
+                self.sound.play('animal_0') # Small audio feedback
+                print(f"✔️ Player {pid} is Ready!")
+                
+                # Check if everyone is ready
+                if all(player['ready'] for player in self.active_players.values()):
+                    print("✅ All players locked in! Starting Intro Sequence...")
+                    self.sound.play('success')
+                    self.state = "INTRO_SEQUENCE"
+                    self.show_index = 0
+                    self.show_timer = time.time()
+                    self.played_step_sound = False
+            return
+
+        # --- Handle the Game Phase Input ---
+        if self.state != "WAITING_INPUT": return
         if p['done']: return 
 
         expected_val = self.sequence[p['input_index']]
@@ -346,12 +419,13 @@ class AnimalSoundsGame:
                     frame[led * 12 + 8 + idx] = b
         return frame
 
-    def start_game(self, num_players):
+    def start_game(self, num_players, difficulty="EASY"):
         with self.lock:
             if num_players > 8: num_players = 8
             if num_players < 1: num_players = 1
             
             self.started_with = num_players
+            self.difficulty = difficulty 
             self.active_players.clear()
             
             for i in range(num_players):
@@ -361,16 +435,14 @@ class AnimalSoundsGame:
                     'wall': wall,
                     'side': side,
                     'input_index': 0,
-                    'done': False
+                    'done': False,
+                    'ready': False # Added the ready flag!
                 }
                 
-            print(f"\n🎮 Started Animal Sounds with {num_players} players.")
+            print(f"\n🎮 Started Animal Sounds with {num_players} players. Difficulty: {difficulty}")
             
-            # Start the 5-step Intro Sequence
-            self.state = "INTRO_SEQUENCE"
-            self.show_index = 0
-            self.show_timer = time.time()
-            self.played_step_sound = False
+            # Game starts in the waiting phase now!
+            self.state = "WAITING_READY"
 
 
 # --- Network Manager ---
@@ -460,34 +532,165 @@ def game_thread_func(game):
         game.tick()
         time.sleep(0.01)
 
+# --- GUI Manager ---
+
+class AnimalSoundsGUI:
+    def __init__(self, root, game, net):
+        self.root = root
+        self.game = game
+        self.net = net
+        self.root.title("Animal Sounds Control Panel")
+        self.root.geometry("450x520") 
+        self.root.resizable(False, False)
+
+        self.bg_color = "#1E1E2E"
+        self.root.configure(bg=self.bg_color)
+
+        self.status_var = tk.StringVar()
+        self.status_label = tk.Label(
+            root, textvariable=self.status_var, 
+            font=("Consolas", 15, "bold"), 
+            bg="#313244", fg="#A6E3A1", 
+            width=30, height=3, relief="sunken", bd=4
+        )
+        self.status_label.pack(pady=20)
+
+        diff_frame = tk.Frame(root, bg=self.bg_color)
+        diff_frame.pack(pady=5)
+        
+        self.diff_var = tk.StringVar(value="EASY") 
+        
+        tk.Radiobutton(
+            diff_frame, text="🟢 EASY (Colors + Sound)", variable=self.diff_var, 
+            value="EASY", font=("Arial", 10, "bold"), bg=self.bg_color, fg="#A6E3A1", 
+            selectcolor="#313244", activebackground=self.bg_color, activeforeground="#A6E3A1"
+        ).grid(row=0, column=0, padx=10)
+        
+        tk.Radiobutton(
+            diff_frame, text="🔴 HARD (Sound Only)", variable=self.diff_var, 
+            value="HARD", font=("Arial", 10, "bold"), bg=self.bg_color, fg="#F38BA8", 
+            selectcolor="#313244", activebackground=self.bg_color, activeforeground="#F38BA8"
+        ).grid(row=0, column=1, padx=10)
+
+        tk.Label(
+            root, text="Select Players to Start (Max 8):", 
+            font=("Arial", 12, "bold"), 
+            bg=self.bg_color, fg="#CDD6F4"
+        ).pack(pady=5)
+
+        control_frame = tk.Frame(root, bg=self.bg_color)
+        control_frame.pack(pady=5)
+
+        btn_colors = [
+            "#89B4FA", "#74C7EC", "#89DCEB", 
+            "#F9E2AF", "#FAB387", "#F38BA8", 
+            "#EBA0AC", "#F5C2E7"
+        ]
+
+        for i in range(1, 9):
+            idx = i - 1
+            row = idx // 3
+            col = idx % 3
+            
+            btn = tk.Button(
+                control_frame, text=f"{i} Player{'s' if i > 1 else ''}", 
+                font=("Arial", 11, "bold"),
+                bg=btn_colors[idx], fg="#11111B",
+                activebackground="#FFFFFF",
+                width=10, height=2, bd=3,
+                command=lambda num=i: self.start_game(num)
+            )
+            btn.grid(row=row, column=col, padx=5, pady=5)
+
+        action_frame = tk.Frame(root, bg=self.bg_color)
+        action_frame.pack(pady=15)
+
+        self.restart_btn = tk.Button(
+            action_frame, text="↻ Restart", 
+            font=("Arial", 11, "bold"), 
+            bg="#F9E2AF", fg="#11111B",
+            width=12, height=2, bd=3,
+            command=self.restart_round
+        )
+        self.restart_btn.grid(row=0, column=0, padx=10)
+
+        self.quit_btn = tk.Button(
+            action_frame, text="✖ Quit", 
+            font=("Arial", 11, "bold"), 
+            bg="#F38BA8", fg="#11111B",
+            width=12, height=2, bd=3,
+            command=self.quit_app
+        )
+        self.quit_btn.grid(row=0, column=1, padx=10)
+
+        self.root.protocol("WM_DELETE_WINDOW", self.quit_app)
+        self.update_loop()
+
+    def start_game(self, num_players):
+        difficulty = self.diff_var.get()
+        self.game.start_game(num_players, difficulty=difficulty)
+
+    def restart_round(self):
+        players = self.game.started_with if self.game.started_with > 0 else 1
+        difficulty = self.diff_var.get()
+        self.game.start_game(players, difficulty=difficulty)
+
+    def quit_app(self):
+        self.game.running = False
+        self.net.running = False
+        self.root.destroy()
+
+    def update_loop(self):
+        state = self.game.state
+        players = len(self.game.active_players)
+        
+        if state == "LOBBY":
+            display_text = "LOBBY\nReady to start!"
+            self.status_label.config(fg="#89B4FA") 
+        elif state == "WAITING_READY": # --- NEW GUI FEEDBACK ---
+            ready_count = sum(1 for p in self.game.active_players.values() if p['ready'])
+            display_text = f"WAITING FOR PLAYERS\n{ready_count} / {self.game.started_with} Ready"
+            self.status_label.config(fg="#89DCEB") # Cyan
+        elif state == "INTRO_SEQUENCE":
+            display_text = "INTRO\nMemorize the sounds!"
+            self.status_label.config(fg="#F5C2E7") 
+        elif state == "SHOWING_SEQUENCE":
+            diff_text = "(EASY)" if self.game.difficulty == "EASY" else "(HARD)"
+            display_text = f"LISTEN! {diff_text}\nMemorize the sequence"
+            self.status_label.config(fg="#F9E2AF") 
+        elif state == "WAITING_INPUT":
+            display_text = f"YOUR TURN!\nPlayers Left: {players}"
+            self.status_label.config(fg="#A6E3A1") 
+        elif state == "ROUND_SUCCESS":
+            display_text = "SUCCESS!\nGet ready for next..."
+            self.status_label.config(fg="#A6E3A1") 
+        elif state == "WINNER":
+            display_text = "WE HAVE A WINNER!"
+            self.status_label.config(fg="#F38BA8") 
+        elif state == "GAMEOVER":
+            display_text = "GAME OVER\nEveryone Eliminated"
+            self.status_label.config(fg="#FAB387") 
+        else:
+            display_text = state
+
+        self.status_var.set(display_text)
+        self.root.after(100, self.update_loop)
+
 # --- Execution ---
 if __name__ == "__main__":
     game = AnimalSoundsGame()
+    
     net = NetworkManager(game)
     net.start_bg()
     
     gt = threading.Thread(target=game_thread_func, args=(game,), daemon=True)
     gt.start()
     
-    print("\n🦁 Animal Sounds Console Server Running.")
-    print("Commands: 'start <num_players>' (max 8), 'quit'")
+    root = tk.Tk()
+    gui = AnimalSoundsGUI(root, game, net)
     
-    try:
-        while game.running:
-            cmd = input("> ").strip().lower()
-            if cmd in ['quit', 'exit']:
-                game.running = False
-                break
-            elif cmd.startswith('start'):
-                try:
-                    num = int(cmd.split()[1])
-                    game.start_game(num)
-                except:
-                    print("Usage: start <num_players>")
-            else:
-                 print("Unknown command.")
-    except KeyboardInterrupt:
-        game.running = False
-
-    net.running = False
+    print("\n🦁 Animal Sounds GUI Running. Check the new window!")
+    
+    root.mainloop()
+    
     print("Exiting...")
