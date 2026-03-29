@@ -6,6 +6,7 @@ import os
 import json
 import random
 import pygame
+import tkinter as tk
 
 # --- Configurație Rețea Conform Documentației ---
 UDP_IP_BROADCAST = "255.255.255.255"
@@ -28,7 +29,6 @@ YELLOW  = (255, 220, 0)
 BLACK   = (0, 0, 0)
 WHITE   = (255, 255, 255)
 GRAY    = (40, 40, 40)
-LIGHT_GRAY = (200, 200, 200)
 
 TILE_COLS_M1 = [2, 5, 9, 12]
 TILE_COLS_M2 = [6, 7, 8, 9] 
@@ -38,7 +38,6 @@ HIT_ZONE_BOTTOM = (22, 31)
 HIT_ZONE_TOP    = (0, 9)        
 FLASH_DURATION  = 0.20
 
-# Pixel Art pentru Countdown
 DIGITS = {
     3: [(0,0), (1,0), (2,0), (2,1), (1,2), (2,2), (2,3), (0,4), (1,4), (2,4)],
     2: [(0,0), (1,0), (2,0), (2,1), (1,2), (0,2), (0,3), (0,4), (1,4), (2,4)],
@@ -58,7 +57,6 @@ class PianoTilesEngine:
 
         self.button_states = [False] * 512
         self.prev_button_states = [False] * 512
-
         self.display_matrix = [[BLACK for _ in range(WIDTH)] for _ in range(HEIGHT)]
 
         self.audio_enabled = False
@@ -100,12 +98,7 @@ class PianoTilesEngine:
         
         self.stars = []
         for _ in range(25):
-            self.stars.append([
-                random.uniform(0, WIDTH), 
-                random.uniform(0, HEIGHT), 
-                random.uniform(2, 6),
-                random.uniform(0, math.pi * 2)
-            ])
+            self.stars.append([random.uniform(0, WIDTH), random.uniform(0, HEIGHT), random.uniform(2, 6), random.uniform(0, math.pi * 2)])
         
         if self.audio_enabled and self.music_playing:
             pygame.mixer.music.stop()
@@ -124,7 +117,7 @@ class PianoTilesEngine:
                 channel, local = i // 64, i % 64
                 row, col_raw = local // 16, local % 16
                 x = col_raw if row % 2 == 0 else 15 - col_raw
-                y = (channel * 4) + row
+                y = (channel * 4) + row 
                 
                 target_col_idx = None
                 
@@ -164,7 +157,7 @@ class PianoTilesEngine:
             if self.mode == '1':
                 if time_diff > 0.6: continue 
                 if is_bottom_half and tile_id not in self.hit_tiles[col]:
-                    py = int(32 - (target_time - song_time) * self.speed)
+                    py = int(25 - (target_time - song_time) * self.speed)
                     if HIT_ZONE_BOTTOM_COOP[0] <= py <= HIT_ZONE_BOTTOM_COOP[1]:
                         if time_diff < min_diff_1:
                             min_diff_1 = time_diff; best_t1 = tile_id
@@ -262,17 +255,9 @@ class PianoTilesEngine:
 
         if self.mode and self.is_pulsing:
             elapsed = t - self.start_time
-            
-            # --- NUMĂRĂTOAREA INVERSĂ (5 secunde total) ---
-            # 0-2 secunde: Pulsul mov de pregătire
-            # 2-3 secunde: "3"
-            # 3-4 secunde: "2"
-            # 4-5 secunde: "1"
-            
             if elapsed > 5.0: 
                 self.is_pulsing = False
                 self.start_time = time.time() 
-                
                 if self.audio_enabled and not self.music_playing:
                     try:
                         if os.path.exists(AUDIO_FILE):
@@ -281,13 +266,11 @@ class PianoTilesEngine:
                             self.music_playing = True
                     except Exception: pass
                     
-            # Randăm matricea neagră ca bază pentru countdown
             for y in range(HEIGHT):
                 for x in range(WIDTH):
                     self.set_pixel(buffer, x, y, *BLACK)
                     
             if elapsed < 2.0:
-                # Arată frame-ul mov care pulsează
                 for y in range(HEIGHT):
                     for x in range(WIDTH):
                         is_frame = (y < 2 or y >= HEIGHT - 2)
@@ -302,7 +285,6 @@ class PianoTilesEngine:
                 self.draw_digit(buffer, 2, 5, 11, WHITE, scale=2)
             elif 4.0 <= elapsed < 5.0:
                 self.draw_digit(buffer, 1, 5, 11, WHITE, scale=2)
-                
             return buffer
 
         for y in range(HEIGHT):
@@ -318,7 +300,6 @@ class PianoTilesEngine:
                     continue
 
                 self.set_pixel(buffer, x, y, *BLACK)
-
                 song_time = t - self.start_time
                 active_cols = TILE_COLS_M1 if self.mode == '1' else TILE_COLS_M2
 
@@ -332,10 +313,8 @@ class PianoTilesEngine:
                     if self.mode == '1':
                         if not (sx <= x <= sx + 1): continue
                         if tile_id in self.miss_tiles[json_col]: continue
-                        
                         py_f = 27 - (target_time - song_time) * self.speed
                         py = int(py_f)
-                        
                         if y == py:
                             if tile_id in self.hit_tiles[json_col]:
                                 if (json_col, tile_id, 'down') in self.flash_hits: 
@@ -346,12 +325,10 @@ class PianoTilesEngine:
                                 
                     elif self.mode == '2':
                         if x != sx: continue 
-                        
                         uid_d = f"d_{tile_id}"
                         if uid_d not in self.miss_tiles[json_col]:
                             pd_f = 27 - (target_time - song_time) * self.speed
                             pd = int(pd_f)
-                            
                             if pd > 16 and y == pd:
                                 if uid_d in self.hit_tiles[json_col]:
                                     if (json_col, tile_id, 'down') in self.flash_hits: 
@@ -364,7 +341,6 @@ class PianoTilesEngine:
                         if uid_u not in self.miss_tiles[json_col]:
                             pu_f = 4 + (target_time - song_time) * self.speed
                             pu = int(pu_f)
-                            
                             if pu < 15 and y == pu:
                                 if uid_u in self.hit_tiles[json_col]:
                                     if (json_col, tile_id, 'up') in self.flash_hits: 
@@ -388,7 +364,6 @@ class PianoTilesEngine:
             buffer[offset + 16] = b
 
 
-# --- NETWORK MANAGER ---
 class NetworkManager:
     def __init__(self, game):
         self.game = game
@@ -397,7 +372,6 @@ class NetworkManager:
         self.sock_recv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.running = True
         self.sequence_number = 0
-        
         try:
             self.sock_recv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.sock_recv.bind(("0.0.0.0", UDP_PORT_RECV))
@@ -419,12 +393,7 @@ class NetworkManager:
         
         rand1 = random.randint(0, 127)
         rand2 = random.randint(0, 127)
-        start_packet = bytearray([
-            0x75, rand1, rand2, 0x00, 0x08, 
-            0x02, 0x00, 0x00, 0x33, 0x44,   
-            (self.sequence_number >> 8) & 0xFF, self.sequence_number & 0xFF,
-            0x00, 0x00, 0x00 
-        ])
+        start_packet = bytearray([0x75, rand1, rand2, 0x00, 0x08, 0x02, 0x00, 0x00, 0x33, 0x44, (self.sequence_number >> 8) & 0xFF, self.sequence_number & 0xFF, 0x00, 0x00, 0x00])
         start_packet.append(0x0E) 
         start_packet.append(0x00) 
         try: 
@@ -435,16 +404,10 @@ class NetworkManager:
         fff0_payload = bytearray()
         for _ in range(NUM_CHANNELS):
             fff0_payload += bytes([(LEDS_PER_CHANNEL >> 8) & 0xFF, LEDS_PER_CHANNEL & 0xFF])
-
-        fff0_internal = bytearray([
-            0x02, 0x00, 0x00, 0x88, 0x77, 0xFF, 0xF0, 
-            (len(fff0_payload) >> 8) & 0xFF, (len(fff0_payload) & 0xFF)
-        ]) + fff0_payload
+        fff0_internal = bytearray([0x02, 0x00, 0x00, 0x88, 0x77, 0xFF, 0xF0, (len(fff0_payload) >> 8) & 0xFF, (len(fff0_payload) & 0xFF)]) + fff0_payload
         
         fff0_len = len(fff0_internal) - 1
-        fff0_packet = bytearray([
-            0x75, rand1, rand2, (fff0_len >> 8) & 0xFF, (fff0_len & 0xFF)
-        ]) + fff0_internal
+        fff0_packet = bytearray([0x75, rand1, rand2, (fff0_len >> 8) & 0xFF, (fff0_len & 0xFF)]) + fff0_internal
         fff0_packet.append(0x1E) 
         fff0_packet.append(0x00) 
         try: 
@@ -457,18 +420,9 @@ class NetworkManager:
         
         for i in range(0, len(frame_data), chunk_size):
             chunk = frame_data[i:i+chunk_size]
-            internal_data = bytearray([
-                0x02, 0x00, 0x00, 
-                (0x8877 >> 8) & 0xFF, (0x8877 & 0xFF), 
-                (data_packet_index >> 8) & 0xFF, (data_packet_index & 0xFF), 
-                (len(chunk) >> 8) & 0xFF, (len(chunk) & 0xFF) 
-            ]) + chunk
-            
+            internal_data = bytearray([0x02, 0x00, 0x00, (0x8877 >> 8) & 0xFF, (0x8877 & 0xFF), (data_packet_index >> 8) & 0xFF, (data_packet_index & 0xFF), (len(chunk) >> 8) & 0xFF, (len(chunk) & 0xFF)]) + chunk
             payload_len = len(internal_data) - 1 
-            packet = bytearray([
-                0x75, rand1, rand2, (payload_len >> 8) & 0xFF, (payload_len & 0xFF)
-            ]) + internal_data
-            
+            packet = bytearray([0x75, rand1, rand2, (payload_len >> 8) & 0xFF, (payload_len & 0xFF)]) + internal_data
             if len(chunk) == 984: packet.append(0x1E) 
             else: packet.append(0x36) 
             packet.append(0x00)
@@ -476,16 +430,10 @@ class NetworkManager:
                 self.sock_send.sendto(packet, (UDP_IP_BROADCAST, port))
                 self.sock_send.sendto(packet, (UDP_IP_LOCAL, port))
             except: pass
-            
             data_packet_index += 1
             time.sleep(0.005) 
 
-        end_packet = bytearray([
-            0x75, rand1, rand2, 0x00, 0x08,
-            0x02, 0x00, 0x00, 0x55, 0x66,
-            (self.sequence_number >> 8) & 0xFF, self.sequence_number & 0xFF,
-            0x00, 0x00, 0x00 
-        ])
+        end_packet = bytearray([0x75, rand1, rand2, 0x00, 0x08, 0x02, 0x00, 0x00, 0x55, 0x66, (self.sequence_number >> 8) & 0xFF, self.sequence_number & 0xFF, 0x00, 0x00, 0x00])
         end_packet.append(0x0E) 
         end_packet.append(0x00) 
         try: 
@@ -512,117 +460,160 @@ class NetworkManager:
         t1.start()
         t2.start()
 
-
-# --- GUI PYGAME ---
-class VisualInterface:
+# --- WINDOW 1: TV SCOREBOARD (AUDIENCE DISPLAY) ---
+class TVScoreboard:
     def __init__(self, game):
         self.game = game
-        pygame.init()
-        
-        self.cell_size = 20
-        self.grid_w = WIDTH * self.cell_size
-        self.grid_h = HEIGHT * self.cell_size
-        self.panel_w = 300
-        
-        self.screen = pygame.display.set_mode((self.grid_w + self.panel_w, self.grid_h))
-        pygame.display.set_caption("Matrix Piano Tiles - Control Panel")
-        
-        self.font_large = pygame.font.SysFont("Segoe UI", 24, bold=True)
-        self.font_small = pygame.font.SysFont("Segoe UI", 16)
-        self.clock = pygame.time.Clock()
-
-    def draw_text(self, text, font, color, x, y):
-        surface = font.render(text, True, color)
-        self.screen.blit(surface, (x, y))
 
     def run(self):
+        pygame.init()
+        # Scalat la 25 pixeli pe bloc pentru a arăta mai mare pe TV
+        self.cell_size = 25
+        self.grid_w = WIDTH * self.cell_size
+        self.grid_h = HEIGHT * self.cell_size
+        self.panel_w = 400 
+        
+        self.screen = pygame.display.set_mode((self.grid_w + self.panel_w, self.grid_h))
+        pygame.display.set_caption("Piano Tiles - TV Scoreboard")
+        
+        self.font_title = pygame.font.SysFont("Segoe UI", 36, bold=True)
+        self.font_large = pygame.font.SysFont("Segoe UI", 28, bold=True)
+        self.font_small = pygame.font.SysFont("Segoe UI", 20)
+        self.clock = pygame.time.Clock()
+
         while self.game.running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.game.running = False
-                elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_1:
-                        self.game.mode = '1'
-                        self.game.speed = 7      
-                        self.game.is_pulsing = True
-                        self.game._reset_state()
-                        self.game.start_time = time.time()
-                    elif event.key == pygame.K_2:
-                        self.game.mode = '2'
-                        self.game.speed = 12     
-                        self.game.is_pulsing = True
-                        self.game._reset_state()
-                        self.game.start_time = time.time()
-                    elif event.key == pygame.K_0:
-                        self.game.mode = None
-                        self.game._reset_state()
-                    elif event.key == pygame.K_q:
-                        self.game.running = False
 
             self.screen.fill((20, 20, 20))
 
+            # Render Matrix
             for y in range(HEIGHT):
                 for x in range(WIDTH):
                     color = self.game.display_matrix[y][x]
                     rect = (x * self.cell_size, y * self.cell_size, self.cell_size - 1, self.cell_size - 1)
                     pygame.draw.rect(self.screen, color, rect)
                     
-            pygame.draw.line(self.screen, GRAY, (self.grid_w, 0), (self.grid_w, self.grid_h), 2)
+            pygame.draw.line(self.screen, GRAY, (self.grid_w, 0), (self.grid_w, self.grid_h), 4)
 
-            px = self.grid_w + 20
-            self.draw_text("PIANO TILES MATRIX", self.font_large, CYAN, px, 20)
+            # Render Scores
+            px = self.grid_w + 30
+            surface = self.font_title.render("PIANO TILES", True, CYAN)
+            self.screen.blit(surface, (px, 20))
             
             mode_str = "Co-op (2x2)" if self.game.mode == '1' else "1v1 (1x1)" if self.game.mode == '2' else "Așteptare"
-            self.draw_text(f"Status: {mode_str}", self.font_small, YELLOW, px, 60)
-            self.draw_text(f"Tiles Rămase/Total: {len(self.game.beatmap)}", self.font_small, WHITE, px, 85)
+            surface = self.font_small.render(f"Status: {mode_str}", True, YELLOW)
+            self.screen.blit(surface, (px, 80))
 
             if self.game.mode == '1':
-                self.draw_text("Scor CO-OP:", self.font_large, GREEN, px, 140)
-                self.draw_text(f"Hits: {self.game.score_p2}", self.font_small, WHITE, px, 180)
-                self.draw_text(f"Misses: {self.game.misses_p2}", self.font_small, WHITE, px, 205)
+                surface = self.font_large.render("SCOR CO-OP:", True, GREEN)
+                self.screen.blit(surface, (px, 180))
+                surface = self.font_small.render(f"Hits: {self.game.score_p2}", True, WHITE)
+                self.screen.blit(surface, (px, 230))
+                surface = self.font_small.render(f"Misses: {self.game.misses_p2}", True, WHITE)
+                self.screen.blit(surface, (px, 260))
                 
                 missed_p2_list = [t for col in self.game.miss_tiles.values() for t in col]
                 if missed_p2_list:
-                    self.draw_text("Tile-uri ratate (ID):", self.font_small, (255, 100, 100), px, 240)
-                    self.draw_text(str(sorted(missed_p2_list)[:15]) + ("..." if len(missed_p2_list)>15 else ""), self.font_small, WHITE, px, 260)
+                    surface = self.font_small.render("Tile-uri ratate (ID):", True, (255, 100, 100))
+                    self.screen.blit(surface, (px, 300))
+                    surface = self.font_small.render(str(sorted(missed_p2_list)[:10]) + ("..." if len(missed_p2_list)>10 else ""), True, WHITE)
+                    self.screen.blit(surface, (px, 330))
 
             elif self.game.mode == '2':
-                self.draw_text("Scor P1 (Sus):", self.font_large, PURPLE, px, 140)
-                self.draw_text(f"Hits: {self.game.score_p1} | Misses: {self.game.misses_p1}", self.font_small, WHITE, px, 180)
+                surface = self.font_large.render("SCOR P1 (SUS):", True, PURPLE)
+                self.screen.blit(surface, (px, 180))
+                surface = self.font_small.render(f"Hits: {self.game.score_p1}  |  Misses: {self.game.misses_p1}", True, WHITE)
+                self.screen.blit(surface, (px, 220))
                 missed_p1_list = sorted([int(t.split('_')[1]) for col in self.game.miss_tiles.values() for t in col if str(t).startswith('u_')])
-                if missed_p1_list: self.draw_text(f"Ratări: {str(missed_p1_list[:10])}", self.font_small, WHITE, px, 205)
+                if missed_p1_list: 
+                    surface = self.font_small.render(f"Ratări: {str(missed_p1_list[:8])}", True, WHITE)
+                    self.screen.blit(surface, (px, 250))
 
-                self.draw_text("Scor P2 (Jos):", self.font_large, CYAN, px, 250)
-                self.draw_text(f"Hits: {self.game.score_p2} | Misses: {self.game.misses_p2}", self.font_small, WHITE, px, 290)
+                surface = self.font_large.render("SCOR P2 (JOS):", True, CYAN)
+                self.screen.blit(surface, (px, 330))
+                surface = self.font_small.render(f"Hits: {self.game.score_p2}  |  Misses: {self.game.misses_p2}", True, WHITE)
+                self.screen.blit(surface, (px, 370))
                 missed_p2_list = sorted([int(t.split('_')[1]) for col in self.game.miss_tiles.values() for t in col if str(t).startswith('d_')])
-                if missed_p2_list: self.draw_text(f"Ratări: {str(missed_p2_list[:10])}", self.font_small, WHITE, px, 315)
+                if missed_p2_list: 
+                    surface = self.font_small.render(f"Ratări: {str(missed_p2_list[:8])}", True, WHITE)
+                    self.screen.blit(surface, (px, 400))
 
             if self.game.game_over:
-                self.draw_text("SONG COMPLETE!", self.font_large, YELLOW, px, 370)
+                surface = self.font_title.render("SONG COMPLETE!", True, YELLOW)
+                self.screen.blit(surface, (px, 500))
 
-            self.draw_text("Comenzi Tastatură:", self.font_large, WHITE, px, 450)
-            self.draw_text("[1] - Start Mod Co-op", self.font_small, LIGHT_GRAY, px, 490)
-            self.draw_text("[2] - Start Mod 1v1", self.font_small, LIGHT_GRAY, px, 515)
-            self.draw_text("[0] - Oprește / Așteptare", self.font_small, LIGHT_GRAY, px, 540)
-            self.draw_text("[Q] - Închide Aplicația", self.font_small, LIGHT_GRAY, px, 565)
-            
             pygame.display.flip()
-            self.clock.tick(30) 
+            self.clock.tick(30)
+
+def run_tv_thread(game):
+    tv = TVScoreboard(game)
+    tv.run()
+
+# --- WINDOW 2: TKINTER CONTROL PANEL (ADMIN LAPTOP) ---
+class ControlPanel:
+    def __init__(self, root, game):
+        self.root = root
+        self.game = game
+        self.root.title("Piano Tiles - Control Panel")
+        self.root.geometry("350x380")
+        self.root.configure(bg="#1E1E2E")
+        self.root.resizable(False, False)
+
+        tk.Label(root, text="ADMIN CONTROLS", font=("Arial", 16, "bold"), bg="#1E1E2E", fg="#A6E3A1").pack(pady=15)
+
+        tk.Button(root, text=" Start Co-op (Speed 7)", font=("Arial", 12, "bold"), bg="#89B4FA", fg="#11111B", height=2, command=self.start_coop).pack(fill="x", padx=30, pady=8)
+        tk.Button(root, text=" Start 1v1 (Speed 12)", font=("Arial", 12, "bold"), bg="#F9E2AF", fg="#11111B", height=2, command=self.start_1v1).pack(fill="x", padx=30, pady=8)
+        tk.Button(root, text=" Stop / Standby", font=("Arial", 12, "bold"), bg="#FAB387", fg="#11111B", height=2, command=self.stop_game).pack(fill="x", padx=30, pady=8)
+        tk.Button(root, text=" Închide Sistemul", font=("Arial", 12, "bold"), bg="#F38BA8", fg="#11111B", height=2, command=self.quit_app).pack(fill="x", padx=30, pady=15)
+
+        self.root.protocol("WM_DELETE_WINDOW", self.quit_app)
+        self.check_status()
+
+    def start_coop(self):
+        self.game.mode = '1'
+        self.game.speed = 7
+        self.game.is_pulsing = True
+        self.game._reset_state()
+        self.game.start_time = time.time()
+
+    def start_1v1(self):
+        self.game.mode = '2'
+        self.game.speed = 12
+        self.game.is_pulsing = True
+        self.game._reset_state()
+        self.game.start_time = time.time()
+
+    def stop_game(self):
+        self.game.mode = None
+        self.game._reset_state()
+
+    def quit_app(self):
+        self.game.running = False
+        self.root.destroy()
+
+    def check_status(self):
+        if not self.game.running:
+            self.root.destroy()
+            return
+        self.root.after(100, self.check_status)
 
 if __name__ == "__main__":
     game = PianoTilesEngine()
     net = NetworkManager(game)
-    
     net.start_bg()
-    
-    try:
-        gui = VisualInterface(game)
-        gui.run()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        game.running = False
-        net.running = False
-        if game.audio_enabled:
-            pygame.mixer.quit()
-        pygame.quit()
+
+    # Pornim interfața TV pentru public pe un thread secundar
+    tv_thread = threading.Thread(target=run_tv_thread, args=(game,), daemon=True)
+    tv_thread.start()
+
+    root = tk.Tk()
+    app = ControlPanel(root, game)
+    root.mainloop()
+
+    game.running = False
+    net.running = False
+    if game.audio_enabled:
+        pygame.mixer.quit()
+    pygame.quit()
