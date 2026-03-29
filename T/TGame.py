@@ -13,8 +13,8 @@ pygame.mixer.init()
 
 # --- Setări de Rețea UDP Matrice ---
 UDP_SEND_IP = "255.255.255.255"
-UDP_SEND_PORT = 4626
-UDP_LISTEN_PORT = 7800
+UDP_SEND_PORT = 1068
+UDP_LISTEN_PORT = 1070
 
 # --- Setari Retea GUI (Local IPC) ---
 GUI_SEND_PORT = 1071
@@ -235,10 +235,10 @@ class SequenceGame:
         elif self.state == "SHOW_WIN":
             if elapsed >= 5.0:
                 if self.is_final_win:
-                    print("Victorie finală! Scorurile au fost resetate pentru o nouă confruntare.")
-                    self.scores = [0] * self.num_players
-                    self.is_final_win = False
-                self.restart_game()
+                    print("Jocul s-a încheiat complet. Așteptare comenzi...")
+                    self.state = "WAITING_FOR_START"
+                else:
+                    self.restart_game()
 
         elif self.state == "PLAYER_TURN":
             for flat_idx in just_pressed:
@@ -277,6 +277,7 @@ class SequenceGame:
             for flat_idx in just_pressed:
                 x, y = get_xy_from_flat(flat_idx)
 
+                # Verificăm dacă apasă un tile nepermis în pauza de succes
                 if is_playable(x, y) and (x, y) not in self.sequence:
                     self.state = "TURN_FAIL"
                     self.state_time = now
