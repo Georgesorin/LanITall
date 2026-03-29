@@ -7,6 +7,10 @@ import psutil
 import os
 import tkinter as tk
 
+# --- FORCE PYGAME TO IGNORE VIDEO DRIVERS (Prevents X11 Crashes) ---
+os.environ["SDL_VIDEODRIVER"] = "dummy"
+#os.environ["SDL_AUDIODRIVER"] = "dsp" 
+
 try:
     import pygame
     PYGAME_AVAILABLE = True
@@ -482,13 +486,18 @@ class AnimalSoundsGUI:
         # --- Screen 2: Inside Live Scoreboard ---
         self.score_window = tk.Toplevel(self.root)
         self.score_window.title("INSIDE SCREEN - Animal Sounds")
-        self.score_window.geometry("1920x1080")
+        
+        # --- REDUCED SIZE FOR LOWER RESOLUTION SCREENS ---
+        self.score_window.geometry("1280x720")
         self.score_window.configure(bg="#050505")
         
-        tk.Label(self.score_window, text="ANIMAL SOUNDS", font=("Consolas", 64, "bold"), bg="#050505", fg="#00FFFF").pack(pady=20)
+        # Shrunk Title Font & Padding
+        tk.Label(self.score_window, text="ANIMAL SOUNDS", font=("Consolas", 48, "bold"), bg="#050505", fg="#00FFFF").pack(pady=10)
         
         self.inside_timer_var = tk.StringVar(value="--")
-        self.inside_timer_label = tk.Label(self.score_window, textvariable=self.inside_timer_var, font=("Consolas", 72, "bold"), bg="#050505", fg="#FFFF00")
+        
+        # Shrunk Timer Font & Padding
+        self.inside_timer_label = tk.Label(self.score_window, textvariable=self.inside_timer_var, font=("Consolas", 54, "bold"), bg="#050505", fg="#FFFF00")
         self.inside_timer_label.pack(pady=10)
 
         self.score_frame = tk.Frame(self.score_window, bg="#050505")
@@ -499,8 +508,9 @@ class AnimalSoundsGUI:
 
         for i in range(8):
             var = tk.StringVar(value=f"PLAYER {i+1}\nWAITING")
-            lbl = tk.Label(self.score_frame, textvariable=var, font=("Consolas", 42, "bold"), bg="#111111", fg="#555555", width=10, height=3, relief="ridge", bd=6)
-            lbl.grid(row=i//4, column=i%4, padx=25, pady=25)
+            # Shrunk Player Box Fonts & Spacing
+            lbl = tk.Label(self.score_frame, textvariable=var, font=("Consolas", 28, "bold"), bg="#111111", fg="#555555", width=12, height=3, relief="ridge", bd=6)
+            lbl.grid(row=i//4, column=i%4, padx=15, pady=15)
             self.score_vars.append(var)
             self.score_labels.append(lbl)
 
