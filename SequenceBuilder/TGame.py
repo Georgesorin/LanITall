@@ -13,8 +13,8 @@ pygame.mixer.init()
 
 # --- Setări de Rețea UDP Matrice ---
 UDP_SEND_IP = "255.255.255.255"
-UDP_SEND_PORT = 1068
-UDP_LISTEN_PORT = 1070
+UDP_SEND_PORT = 4626
+UDP_LISTEN_PORT = 7800
 
 # --- Setari Retea GUI (Local IPC) ---
 GUI_SEND_PORT = 1071
