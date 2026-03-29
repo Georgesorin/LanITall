@@ -89,13 +89,15 @@ class SoundManager:
     def __init__(self):
         self.enabled = PYGAME_AVAILABLE
         if self.enabled:
+            # Explicitly demanding 16-bit signed audio
             pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=512)
             self.sounds = {}
-            if not os.path.exists("_sfx/success.wav"): SoundGenerator.generate_all()
+            if not os.path.exists("_sfx/animal_0.wav"): SoundGenerator.generate_all()
             for sfx in ['animal_0', 'animal_1', 'animal_2', 'animal_3', 'animal_4', 'success', 'eliminate', 'win']:
-                try: self.sounds[sfx] = pygame.mixer.Sound(f"_sfx/{sfx}.wav")
+                try: 
+                    self.sounds[sfx] = pygame.mixer.Sound(f"_sfx/{sfx}.wav")
                 except Exception as e: 
-                    print(f"WARNING: Corrupted or unsupported format for {sfx}.wav -> {e}")
+                    print(f"WARNING: Corrupted format for {sfx}.wav -> {e}")
 
     def play(self, name):
         if self.enabled and name in self.sounds:
@@ -138,7 +140,6 @@ class AnimalSoundsGame:
         with self.lock:
             self.active_leds.clear()
 
-            # --- 1. Base Layer ---
             if self.state != "LOBBY":
                 for pid in range(8):
                     wall = (pid // 2) + 1
@@ -157,7 +158,6 @@ class AnimalSoundsGame:
                             b = int(127 + 127 * math.sin(now * 4 + led * 0.5 + 4))
                             self.active_leds[(wall, led)] = (r, g, b)
 
-            # --- 2. The Eye Logic ---
             if self.state in ["LOBBY", "GAMEOVER"]:
                 pulse = int(127 + 127 * math.sin(now * 3))
                 for ch in range(1, 5): self.active_leds[(ch, 0)] = (pulse, 0, 0)
@@ -168,7 +168,6 @@ class AnimalSoundsGame:
                 self.process_inputs()
                 return
 
-            # --- 3. Active Game Logic ---
             if self.state == "WAITING_READY":
                 for pid, p in self.active_players.items():
                     ready_led = 3 if p['side'] == 'left' else 8
@@ -366,7 +365,7 @@ class NetworkManager:
     def send_loop(self):
         while self.running:
             self.send_packet(self.game.render())
-            time.sleep(0.02) 
+            time.sleep(0.05)  # Throttled to 20 FPS to protect the simulator!
 
     def build_packet(self, cmd_h, cmd_l, payload=b""):
         internal = bytearray([0x02, 0x00, 0x00, cmd_h, cmd_l]) + payload
@@ -522,7 +521,7 @@ class AnimalSoundsGUI:
         self.root.destroy()
 
     def update_loop(self):
-        with self.game.lock: # ADDED SAFETY LOCK!
+        with self.game.lock:
             state = self.game.state
             
             # --- Update OUTSIDE Control Panel ---
