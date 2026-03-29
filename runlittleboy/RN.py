@@ -237,7 +237,22 @@ class ScavengerHunt:
 
     def _spawn_target(self, p_id):
         other_walls = [w for w in range(1, 5) if w != p_id]
-        self.players[p_id]["target"] = (random.choice(other_walls), random.randint(1, 10))
+        # Exclude 5 and 6 so targets NEVER overlap with the Start/Finish tiles
+        valid_leds = [1, 2, 3, 4, 7, 8, 9, 10] 
+        
+        while True:
+            target_candidate = (random.choice(other_walls), random.choice(valid_leds))
+            
+            # Ensure this tile isn't already someone else's active target
+            is_occupied = False
+            for other_p, data in self.players.items():
+                if other_p != p_id and data.get("target") == target_candidate:
+                    is_occupied = True
+                    break
+                    
+            if not is_occupied:
+                self.players[p_id]["target"] = target_candidate
+                break
 
     def tick(self):
         now = time.time()
@@ -254,6 +269,17 @@ class ScavengerHunt:
                 pulse = int(127 + 127 * math.sin(now * 10))
                 for p_id in self.players:
                     self.active_leds[(p_id, 0)] = (pulse, pulse, pulse) 
+                    
+                    base_color = WALL_COLORS[p_id]
+                    
+                    # Color the start tile (Tile 5)
+                    if self.button_states[(p_id, 5)]:
+                        # Tile turns into a significantly darker version of their assigned color when held
+                        dark_color = (base_color[0] // 4, base_color[1] // 4, base_color[2] // 4)
+                        self.active_leds[(p_id, 5)] = dark_color 
+                    else:
+                        # Glows bright with the player's normal assigned color when waiting
+                        self.active_leds[(p_id, 5)] = base_color
                 
                 if all(self.button_states[(p, 5)] for p in self.players):
                     print(f"🚀 ROUND {self.current_round} START!")
