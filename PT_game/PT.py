@@ -19,7 +19,7 @@ FRAME_DATA_LENGTH = NUM_CHANNELS * LEDS_PER_CHANNEL * 3
 WIDTH, HEIGHT = 16, 32
 
 BEATMAP_FILE = "level.json"
-AUDIO_FILE = "Rockefeller Street, Nightcore Version (8-bitRockDrum & Bass) Remix.wav"
+AUDIO_FILE = "Nightcore - Rockefeller Street (Lyrics).mp3"
 
 PURPLE  = (154, 66, 255)
 CYAN    = (0, 255, 255)
@@ -61,7 +61,7 @@ class PianoTilesEngine:
             pygame.mixer.init()
             self.audio_enabled = True
         except pygame.error as e:
-            print(f"[AVERTISMENT] Nu s-a putut inițializa audio: {e}")
+            print(f" Nu s-a putut initializa audio: {e}")
 
         self.beatmap = []
         self.load_level(BEATMAP_FILE)
@@ -118,6 +118,7 @@ class PianoTilesEngine:
                 channel, local = i // 64, i % 64
                 row, col_raw = local // 16, local % 16
                 x = col_raw if row % 2 == 0 else 15 - col_raw
+                y = (channel * 4) + row # <-- Am adăugat calculul pentru axa Y
                 
                 target_col_idx = None
                 
@@ -136,15 +137,20 @@ class PianoTilesEngine:
                                 break
                             
                 if target_col_idx is not None:
-                    self._try_hit(target_col_idx, t)
+                    # Pasăm și Y-ul către funcția de validare
+                    self._try_hit(target_col_idx, t, y) 
                     
         self.prev_button_states = list(self.button_states)
 
-    def _try_hit(self, col, current_t):
+    def _try_hit(self, col, current_t, press_y):
         song_time = current_t - self.start_time
         best_t1 = None; min_diff_1 = 999
         best_d  = None; min_diff_d = 999
         best_u  = None; min_diff_u = 999
+
+        # Împărțim podeaua fizică în două teritorii
+        is_top_half = (press_y < 16)
+        is_bottom_half = (press_y >= 16)
 
         for tile_id, tile in enumerate(self.beatmap):
             if tile['column'] != col: continue
@@ -153,27 +159,33 @@ class PianoTilesEngine:
 
             if self.mode == '1':
                 if time_diff > 0.6: continue 
-                if tile_id not in self.hit_tiles[col]:
-                    py = int(27 - (target_time - song_time) * self.speed)
+                # În Co-op vrem ca jucătorii să calce doar în jumătatea de jos
+                if is_bottom_half and tile_id not in self.hit_tiles[col]:
+                    py = int(25 - (target_time - song_time) * self.speed)
                     if HIT_ZONE_BOTTOM_COOP[0] <= py <= HIT_ZONE_BOTTOM_COOP[1]:
                         if time_diff < min_diff_1:
                             min_diff_1 = time_diff; best_t1 = tile_id
                             
             elif self.mode == '2':
                 if time_diff > 0.4: continue 
-                uid_d = f"d_{tile_id}"
-                if uid_d not in self.hit_tiles[col]:
-                    pd = int(27 - (target_time - song_time) * self.speed)
-                    if HIT_ZONE_BOTTOM[0] <= pd <= HIT_ZONE_BOTTOM[1]:
-                        if time_diff < min_diff_d:
-                            min_diff_d = time_diff; best_d = tile_id
-                            
-                uid_u = f"u_{tile_id}"
-                if uid_u not in self.hit_tiles[col]:
-                    pu = int(4 + (target_time - song_time) * self.speed)
-                    if HIT_ZONE_TOP[0] <= pu <= HIT_ZONE_TOP[1]:
-                        if time_diff < min_diff_u:
-                            min_diff_u = time_diff; best_u = tile_id
+                
+                # P2 (JOS) - Verificăm doar dacă fizic s-a călcat jos
+                if is_bottom_half:
+                    uid_d = f"d_{tile_id}"
+                    if uid_d not in self.hit_tiles[col]:
+                        pd = int(25 - (target_time - song_time) * self.speed)
+                        if HIT_ZONE_BOTTOM[0] <= pd <= HIT_ZONE_BOTTOM[1]:
+                            if time_diff < min_diff_d:
+                                min_diff_d = time_diff; best_d = tile_id
+                                
+                # P1 (SUS) - Verificăm doar dacă fizic s-a călcat sus
+                if is_top_half:
+                    uid_u = f"u_{tile_id}"
+                    if uid_u not in self.hit_tiles[col]:
+                        pu = int(3 + (target_time - song_time) * self.speed)
+                        if HIT_ZONE_TOP[0] <= pu <= HIT_ZONE_TOP[1]:
+                            if time_diff < min_diff_u:
+                                min_diff_u = time_diff; best_u = tile_id
 
         if self.mode == '1' and best_t1 is not None:
             self.hit_tiles[col].add(best_t1)
